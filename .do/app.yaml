@@ -1,0 +1,17 @@
+name: gone
+services:
+  - name: web
+    # Build from the Go buildpack (no Dockerfile needed). Update the repo
+    # reference to match your GitHub repo if you deploy via the dashboard.
+    github:
+      repo: vmstio/gone
+      branch: main
+      deploy_on_push: true
+    environment_slug: go
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    instance_count: 1
+    http_port: 8080
+    # The app returns 410 for all real traffic, which App Platform would treat
+    # as unhealthy, so health checks target the dedicated /healthz endpoint.
+    health_check:
+      http_path: /healthz
