@@ -77,7 +77,7 @@ body {
 <img id="illustration" alt="Mastodon" draggable="false" src="data:image/png;base64,__PNG_DATA__">
 </div>
 <div class="dialog__message">
-<h1>vmst.io is gone</h1>
+<h1>vmst.io is HTTP 410 (Gone)</h1>
 </div>
 </div>
 <script>
