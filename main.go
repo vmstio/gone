@@ -25,7 +25,7 @@ const pageTemplate = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The page you are looking for isn't here.</title>
+<title>vmst.io</title>
 <style>
 :root {
   --color-bg: #fff;
@@ -71,7 +71,7 @@ body {
 <img alt="Mastodon" src="data:image/png;base64,__IMG_DATA__">
 </div>
 <div class="dialog__message">
-<h1>The page you are looking for isn't here.</h1>
+<h1>vmst.io is gone</h1>
 </div>
 </div>
 </body>
