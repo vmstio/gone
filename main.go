@@ -12,8 +12,14 @@ import (
 	"strings"
 )
 
+// oopsPNG is the static illustration shown by default; oopsGIF is the
+// animated version swapped in on hover (mirroring the Mastodon error page).
+//
 //go:embed oops.png
 var oopsPNG []byte
+
+//go:embed oops.gif
+var oopsGIF []byte
 
 // page is the fully self-contained HTML served with every 410 response. The
 // illustration is inlined as a data URI so there are no external dependencies
@@ -68,19 +74,29 @@ body {
 <body>
 <div class="dialog">
 <div class="dialog__illustration">
-<img alt="Mastodon" src="data:image/png;base64,__IMG_DATA__">
+<img id="illustration" alt="Mastodon" draggable="false" src="data:image/png;base64,__PNG_DATA__">
 </div>
 <div class="dialog__message">
 <h1>vmst.io is gone</h1>
 </div>
 </div>
+<script>
+(function () {
+  var img = document.getElementById('illustration');
+  var still = img.src;
+  var animated = 'data:image/gif;base64,__GIF_DATA__';
+  img.addEventListener('mouseenter', function () { img.src = animated; });
+  img.addEventListener('mouseleave', function () { img.src = still; });
+})();
+</script>
 </body>
 </html>
 `
 
 func init() {
-	encoded := base64.StdEncoding.EncodeToString(oopsPNG)
-	page = []byte(strings.Replace(pageTemplate, "__IMG_DATA__", encoded, 1))
+	html := strings.Replace(pageTemplate, "__PNG_DATA__", base64.StdEncoding.EncodeToString(oopsPNG), 1)
+	html = strings.Replace(html, "__GIF_DATA__", base64.StdEncoding.EncodeToString(oopsGIF), 1)
+	page = []byte(html)
 }
 
 func main() {

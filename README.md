@@ -4,10 +4,11 @@ A tiny Go web server that responds to **every** request with `HTTP 410 Gone`
 and a self-contained page mirroring the Mastodon error page
 (https://vmst.io/500.htm).
 
-The illustration is embedded into the binary and inlined into the page as a
-base64 data URI, so the app has no external dependencies and serves a single
-410 response per request. Dark mode follows the browser's
-`prefers-color-scheme`.
+The illustrations are embedded into the binary and inlined into the page as
+base64 data URIs, so the app has no external dependencies and serves a single
+410 response per request. A static image shows by default and swaps to the
+animated version on hover, mirroring the Mastodon error page. Dark mode follows
+the browser's `prefers-color-scheme`.
 
 ## Run locally
 
