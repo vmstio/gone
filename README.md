@@ -10,6 +10,10 @@ base64 data URIs, so the app has no external dependencies and serves a single
 animated version on hover, mirroring the Mastodon error page. Dark mode follows
 the browser's `prefers-color-scheme`.
 
+The displayed domain is taken from the request (`X-Forwarded-Host`, falling
+back to `Host`, with any port stripped and the value HTML-escaped), so a single
+deployment can serve any number of domains.
+
 ## Run locally
 
 ```sh

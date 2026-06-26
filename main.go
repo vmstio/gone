@@ -6,7 +6,9 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"fmt"
+	"html"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -21,17 +23,20 @@ var oopsPNG []byte
 //go:embed oops.gif
 var oopsGIF []byte
 
-// page is the fully self-contained HTML served with every 410 response. The
-// illustration is inlined as a data URI so there are no external dependencies
-// and no follow-up requests that would need a non-410 status.
-var page []byte
+// pageTpl is the self-contained HTML with the illustrations inlined as data
+// URIs. The __DOMAIN__ placeholder is filled per request with the requested
+// host, so a single deployment can serve any number of domains.
+var pageTpl string
+
+// defaultDomain is shown when the request carries no usable Host header.
+const defaultDomain = "This site"
 
 const pageTemplate = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>vmst.io</title>
+<title>__DOMAIN__</title>
 <style>
 :root {
   --color-bg: #fff;
@@ -77,7 +82,7 @@ body {
 <img id="illustration" alt="Mastodon" draggable="false" src="data:image/png;base64,__PNG_DATA__">
 </div>
 <div class="dialog__message">
-<h1>vmst.io is HTTP 410 (Gone)</h1>
+<h1>__DOMAIN__ is HTTP 410 (Gone)</h1>
 </div>
 </div>
 <script>
@@ -94,9 +99,35 @@ body {
 `
 
 func init() {
-	html := strings.Replace(pageTemplate, "__PNG_DATA__", base64.StdEncoding.EncodeToString(oopsPNG), 1)
-	html = strings.Replace(html, "__GIF_DATA__", base64.StdEncoding.EncodeToString(oopsGIF), 1)
-	page = []byte(html)
+	pageTpl = strings.Replace(pageTemplate, "__PNG_DATA__", base64.StdEncoding.EncodeToString(oopsPNG), 1)
+	pageTpl = strings.Replace(pageTpl, "__GIF_DATA__", base64.StdEncoding.EncodeToString(oopsGIF), 1)
+}
+
+// domainFromRequest returns the requested host (without any port), suitable
+// for display. It prefers the X-Forwarded-Host header set by proxies such as
+// DigitalOcean App Platform, falling back to the request Host.
+func domainFromRequest(r *http.Request) string {
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	// X-Forwarded-Host may contain a comma-separated list; use the first.
+	if i := strings.IndexByte(host, ','); i >= 0 {
+		host = host[:i]
+	}
+	host = strings.TrimSpace(host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "" {
+		return defaultDomain
+	}
+	return host
+}
+
+// renderPage fills the per-request domain into the cached template.
+func renderPage(domain string) []byte {
+	return []byte(strings.ReplaceAll(pageTpl, "__DOMAIN__", html.EscapeString(domain)))
 }
 
 func main() {
@@ -115,11 +146,12 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 
-	// Every other request gets HTTP 410 Gone with the page.
+	// Every other request gets HTTP 410 Gone with the page, with the heading
+	// populated from the requested domain.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusGone)
-		w.Write(page)
+		w.Write(renderPage(domainFromRequest(r)))
 	})
 
 	addr := ":" + port
