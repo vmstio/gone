@@ -243,6 +243,11 @@ var fediverseUAs = []string{
 	"hubzilla", "honk", "microblog.pub", "wildebeest",
 	"activity-relay", "activityrelay", "activitypub",
 	"joinmastodon", "fedi.buzz",
+	"kbin", "mbin", "firefish", "calckey", "foundkey",
+	"wordpress", "ghost", "discourse",
+	"funkwhale", "owncast", "castopod", "takahe", "bonfire",
+	"gancio", "epicyon", "mitra", "socialhome", "plume",
+	"guppe", "soapbox", "rebased", "vocata", "wafrn",
 }
 
 // isFediverseServerUA reports whether the User-Agent identifies a known
@@ -262,13 +267,23 @@ func isFediverseServerUA(ua string) bool {
 // 410 instead of the HTML page — the 410 alone deindexes the URL.
 var crawlerUAs = []string{
 	"googlebot", "googleother", "google-inspectiontool", "storebot-google",
-	"bingbot", "bingpreview", "applebot", "yandexbot", "baiduspider",
-	"duckduckbot", "duckduckgo", "seznambot", "petalbot", "sogou", "slurp",
+	"google-extended",
+	"bingbot", "bingpreview", "msnbot", "applebot", "applebot-extended",
+	"yandexbot", "baiduspider", "duckduckbot", "duckduckgo",
+	"seznambot", "petalbot", "sogou", "slurp", "yeti", "coccocbot",
+	"exabot", "teoma", "ia_archiver", "archive.org_bot", "mojeekbot",
+	"qwantify",
 	"claudebot", "anthropic", "gptbot", "oai-searchbot", "chatgpt-user",
-	"perplexitybot", "perplexity", "ccbot", "bytespider", "amazonbot",
-	"imagesiftbot", "diffbot", "timpibot", "youbot", "meta-externalagent",
+	"perplexitybot", "perplexity", "perplexity-user", "ccbot", "bytespider",
+	"amazonbot", "imagesiftbot", "diffbot", "timpibot", "youbot",
+	"meta-externalagent", "meta-externalfetcher", "cohere-ai",
+	"cohere-training-data-crawler", "mistralai-user", "mistralai",
+	"omgili", "omgilibot", "kagibot",
 	"facebookexternalhit", "twitterbot", "linkedinbot", "pinterestbot",
+	"slackbot", "discordbot", "telegrambot", "whatsapp",
+	"skypeuripreview", "redditbot", "embedly", "vkshare",
 	"semrushbot", "ahrefsbot", "mj12bot", "dotbot", "dataforseobot",
+	"blexbot", "barkrowler", "serpstatbot", "screaming frog",
 }
 
 // isSearchCrawlerUA reports whether the User-Agent identifies a search/AI
