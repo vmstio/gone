@@ -184,6 +184,16 @@ func isJSONDiscoveryPath(p string) bool {
 	return p == "/.well-known/webfinger" || isNodeInfoPath(p)
 }
 
+// isJSONPath reports whether the request should get a JSON error regardless of
+// the Accept header: the Mastodon REST API (whose clients — apps and scrapers —
+// often send a browser-style Accept), fediverse JSON discovery, and any .json
+// resource.
+func isJSONPath(p string) bool {
+	return strings.HasPrefix(p, "/api/") ||
+		isJSONDiscoveryPath(p) ||
+		strings.HasSuffix(p, ".json")
+}
+
 // isActivityPub reports whether the request is ActivityPub, by either the
 // Accept header (actor fetches) or the Content-Type header (inbox deliveries,
 // which are POSTed with application/activity+json and may not set Accept).
@@ -209,17 +219,24 @@ var mediaExts = map[string]bool{
 //
 // A browser page navigation also lists image types in Accept (e.g.
 // "text/html,...,image/avif,image/webp"), so an Accept-based match only counts
-// when text/html is absent. The file extension is checked as a fallback for
-// clients that send no useful Accept header.
+// when text/html is absent. The file extension and known Mastodon media path
+// prefixes are checked as fallbacks for clients that send a browser-style
+// Accept (e.g. hotlinked <img> tags pointing at /media_proxy/…).
 func isMediaRequest(r *http.Request) bool {
-	accept := strings.ToLower(r.Header.Get("Accept"))
-	if !strings.Contains(accept, "text/html") &&
-		(strings.Contains(accept, "image/") ||
-			strings.Contains(accept, "video/") ||
-			strings.Contains(accept, "audio/")) {
+	p := r.URL.Path
+	if strings.HasPrefix(p, "/media_proxy/") ||
+		strings.HasPrefix(p, "/media_attachments/") ||
+		strings.HasPrefix(p, "/system/") {
 		return true
 	}
-	return mediaExts[strings.ToLower(path.Ext(r.URL.Path))]
+	if mediaExts[strings.ToLower(path.Ext(p))] {
+		return true
+	}
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return !strings.Contains(accept, "text/html") &&
+		(strings.Contains(accept, "image/") ||
+			strings.Contains(accept, "video/") ||
+			strings.Contains(accept, "audio/"))
 }
 
 // renderPage fills the per-request domain into the cached template.
@@ -345,10 +362,11 @@ func main() {
 			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
 			w.Write([]byte(body))
-		case isJSONDiscoveryPath(r.URL.Path),
+		case isJSONPath(r.URL.Path),
 			wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
-			// WebFinger / NodeInfo discovery (by path, any Accept) and generic
-			// JSON API clients get a small JSON error.
+			// Mastodon REST API, WebFinger / NodeInfo discovery, .json
+			// resources (all by path, any Accept), and generic JSON clients get
+			// a small JSON error instead of the ~150 KB HTML page.
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
 			w.Write([]byte(`{"error":"Gone"}` + "\n"))
