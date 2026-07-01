@@ -28,9 +28,30 @@ curl -i http://localhost:8080/
 # HTTP/1.1 410 Gone
 ```
 
+## Content negotiation
+
+Since this is meant to stand in for a decommissioned Mastodon server, most
+traffic comes from other ActivityPub servers rather than browsers. The response
+body is negotiated from the `Accept` header — the status is always `410 Gone`:
+
+| Client `Accept`                                  | Response body |
+|--------------------------------------------------|---------------|
+| `application/activity+json`, `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL |
+| `application/json`, `application/jrd+json`         | `{"error":"Gone"}` (covers WebFinger, API, NodeInfo clients) |
+| anything else (browsers)                          | the HTML page |
+
+Example ActivityPub actor fetch:
+
+```sh
+curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
+# HTTP/1.1 410 Gone
+# Content-Type: application/activity+json; charset=utf-8
+# {"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":"https://your.domain/users/alice"}
+```
+
 ## Endpoints
 
-- `/*` — returns `410 Gone` with the HTML page.
+- `/*` — returns `410 Gone`; body negotiated by `Accept` (see above).
 - `/healthz` — returns `200 OK` for platform health checks.
 
 ## Deploy to DigitalOcean App Platform

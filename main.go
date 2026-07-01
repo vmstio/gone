@@ -103,10 +103,10 @@ func init() {
 	pageTpl = strings.Replace(pageTpl, "__GIF_DATA__", base64.StdEncoding.EncodeToString(oopsGIF), 1)
 }
 
-// domainFromRequest returns the requested host (without any port), suitable
-// for display. It prefers the X-Forwarded-Host header set by proxies such as
-// DigitalOcean App Platform, falling back to the request Host.
-func domainFromRequest(r *http.Request) string {
+// rawHost returns the requested host, preferring the X-Forwarded-Host header
+// set by proxies such as DigitalOcean App Platform and falling back to the
+// request Host. It may still include a port.
+func rawHost(r *http.Request) string {
 	host := r.Header.Get("X-Forwarded-Host")
 	if host == "" {
 		host = r.Host
@@ -115,7 +115,12 @@ func domainFromRequest(r *http.Request) string {
 	if i := strings.IndexByte(host, ','); i >= 0 {
 		host = host[:i]
 	}
-	host = strings.TrimSpace(host)
+	return strings.TrimSpace(host)
+}
+
+// domainFromRequest returns the requested host without any port, for display.
+func domainFromRequest(r *http.Request) string {
+	host := rawHost(r)
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
@@ -123,6 +128,29 @@ func domainFromRequest(r *http.Request) string {
 		return defaultDomain
 	}
 	return host
+}
+
+// requestURL reconstructs the absolute URL that was requested, used as the id
+// of the ActivityPub Tombstone. It trusts the proxy's forwarding headers.
+func requestURL(r *http.Request) string {
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "https"
+	}
+	return scheme + "://" + rawHost(r) + r.URL.RequestURI()
+}
+
+// wantsAny reports whether the Accept header mentions any of the given media
+// types. Matching is a simple case-insensitive substring test, which is enough
+// to distinguish ActivityPub/JSON clients from browsers.
+func wantsAny(accept string, mediaTypes ...string) bool {
+	accept = strings.ToLower(accept)
+	for _, mt := range mediaTypes {
+		if strings.Contains(accept, mt) {
+			return true
+		}
+	}
+	return false
 }
 
 // renderPage fills the per-request domain into the cached template.
@@ -146,12 +174,28 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 
-	// Every other request gets HTTP 410 Gone with the page, with the heading
-	// populated from the requested domain.
+	// Every other request gets HTTP 410 Gone. The body is negotiated from the
+	// Accept header so federating ActivityPub servers receive JSON while
+	// browsers get the HTML page. The status is always 410.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusGone)
-		w.Write(renderPage(domainFromRequest(r)))
+		switch {
+		case wantsAny(r.Header.Get("Accept"), "application/activity+json", "application/ld+json"):
+			// ActivityStreams Tombstone: the canonical representation of a
+			// resource that once existed and is now permanently gone.
+			body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
+			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
+			w.Write([]byte(body))
+		case wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
+			// Generic API / WebFinger clients get a small JSON error.
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
+			w.Write([]byte(`{"error":"Gone"}` + "\n"))
+		default:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
+			w.Write(renderPage(domainFromRequest(r)))
+		}
 	})
 
 	addr := ":" + port
