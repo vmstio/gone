@@ -216,6 +216,14 @@ func isHiddenProbe(p string) bool {
 	return false
 }
 
+// isInboxPath reports whether the request targets an ActivityPub inbox (the
+// shared /inbox or a per-actor /users/x/inbox). Federation delivery POSTs land
+// here; the delivering server only needs the 410 status to stop delivering, so
+// these get an empty body.
+func isInboxPath(p string) bool {
+	return strings.HasSuffix(p, "/inbox")
+}
+
 // isActivityPub reports whether the request is ActivityPub, by either the
 // Accept header (actor fetches) or the Content-Type header (inbox deliveries,
 // which are POSTed with application/activity+json and may not set Accept).
@@ -380,10 +388,15 @@ func main() {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
 			w.Write([]byte(`{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}` + "\n"))
+		case isInboxPath(r.URL.Path):
+			// Inbox delivery POSTs: the remote server only needs the 410 status
+			// to stop delivering, so skip the Tombstone body.
+			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
 		case isActivityPub(r):
 			// ActivityStreams Tombstone: the canonical representation of a
-			// resource that once existed and is now permanently gone. Also
-			// answers inbox delivery POSTs so remote servers stop delivering.
+			// resource that once existed and is now permanently gone. Fetches
+			// of actors, statuses, etc. get the full object.
 			body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
 			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
