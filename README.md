@@ -47,6 +47,7 @@ from the request path and headers. Every response is `410 Gone` **except**
 | Path `/api/…`, `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/…`, any `*.json`, or `Accept: application/json` / `application/jrd+json` | `{"error":"Gone"}`. The Mastodon REST API is matched **by path** because its clients (apps and scrapers alike) usually send a browser-style `Accept` — this is the highest-volume traffic, so answering with a 17-byte JSON body instead of the ~150 KB page is the single biggest bandwidth saving. |
 | Path ending `.rss` / `.atom`                      | empty body with `application/rss+xml` / `application/atom+xml` — dead feed, so readers stop polling |
 | Path `/tags/…`                                    | empty body — hashtag pages are crawler traffic, not human visits |
+| `User-Agent` is a known fediverse server (Mastodon, Lemmy, Pleroma, Akkoma, Misskey, Iceshrimp, Sharkey, Pixelfed, PeerTube, Friendica, GoToSocial, snac, Fedify, relays, …) | ActivityStreams `Tombstone` — a fediverse server that fetched without an explicit AP `Accept` (link preview, generic GET) gets a machine-readable response instead of the HTML page |
 | anything else (browsers)                          | the HTML page |
 
 All 410 responses carry `Cache-Control: public, max-age=86400` so caches and

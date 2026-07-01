@@ -232,6 +232,31 @@ func isActivityPub(r *http.Request) bool {
 		wantsAny(r.Header.Get("Content-Type"), "application/activity+json", "application/ld+json")
 }
 
+// fediverseUAs are substrings identifying known fediverse server software and
+// relays. Matched case-insensitively against the User-Agent so servers that
+// fetch without an explicit ActivityPub Accept (link previews, generic GETs)
+// still get a machine-readable response instead of the HTML page.
+var fediverseUAs = []string{
+	"mastodon", "pleroma", "akkoma", "misskey", "iceshrimp", "sharkey",
+	"lemmy", "pixelfed", "peertube", "friendica", "gotosocial",
+	"snac", "fedify", "bookwyrm", "mobilizon", "writefreely",
+	"hubzilla", "honk", "microblog.pub", "wildebeest",
+	"activity-relay", "activityrelay", "activitypub",
+	"joinmastodon", "fedi.buzz",
+}
+
+// isFediverseServerUA reports whether the User-Agent identifies a known
+// fediverse server or relay.
+func isFediverseServerUA(ua string) bool {
+	ua = strings.ToLower(ua)
+	for _, s := range fediverseUAs {
+		if strings.Contains(ua, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // mediaExts are file extensions that a bucket of images/attachments would have
 // served. Requests for these get an empty 410 rather than a page body.
 var mediaExts = map[string]bool{
@@ -422,6 +447,14 @@ func main() {
 			// Hashtag pages are crawler traffic, not human visits, so drop them
 			// with an empty 410 instead of the ~150 KB page.
 			w.WriteHeader(http.StatusGone)
+		case isFediverseServerUA(r.UserAgent()):
+			// A known fediverse server that didn't send an explicit AP Accept
+			// (e.g. link-preview or generic fetch). Give it a Tombstone rather
+			// than the HTML page.
+			body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
+			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
+			w.Write([]byte(body))
 		default:
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
