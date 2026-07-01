@@ -38,11 +38,14 @@ from the request path and headers. Every response is `410 Gone` **except**
 | Match (in order)                                  | Response |
 |---------------------------------------------------|----------|
 | Path `/robots.txt`                                | `200` `text/plain` — `User-agent: *` / `Disallow: /`, to steer crawlers away |
+| Dotfile probe (a path segment starting with `.`, e.g. `/.env`, `/.git/HEAD`; `/.well-known/…` excluded) | empty body — vulnerability scanner noise |
 | Media request (see below)                         | empty body — the client discards it anyway |
 | Path `/.well-known/host-meta[.json]`              | empty body with `application/xrd+xml` (or `application/json` for the `.json` variant) — WebFinger discovery document |
 | Path `/_matrix/…` or `/.well-known/matrix/…`      | Matrix error `{"errcode":"M_UNKNOWN","error":"…"}` (Matrix clients often send no `Accept`, so the path is the signal) |
 | ActivityPub: `Accept` **or** `Content-Type` is `application/activity+json` / `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL. `Content-Type` matching means inbox delivery POSTs get a proper AP response and remote servers stop delivering. |
 | Path `/api/…`, `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/…`, any `*.json`, or `Accept: application/json` / `application/jrd+json` | `{"error":"Gone"}`. The Mastodon REST API is matched **by path** because its clients (apps and scrapers alike) usually send a browser-style `Accept` — this is the highest-volume traffic, so answering with a 17-byte JSON body instead of the ~150 KB page is the single biggest bandwidth saving. |
+| Path ending `.rss` / `.atom`                      | empty body with `application/rss+xml` / `application/atom+xml` — dead feed, so readers stop polling |
+| Path `/tags/…`                                    | empty body — hashtag pages are crawler traffic, not human visits |
 | anything else (browsers)                          | the HTML page |
 
 All 410 responses carry `Cache-Control: public, max-age=86400` so caches and

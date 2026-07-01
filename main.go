@@ -194,6 +194,28 @@ func isJSONPath(p string) bool {
 		strings.HasSuffix(p, ".json")
 }
 
+// isFeedPath reports whether the request is for an RSS or Atom feed. A dead
+// feed answered with a 410 tells readers to stop polling.
+func isFeedPath(p string) bool {
+	return strings.HasSuffix(p, ".rss") || strings.HasSuffix(p, ".atom")
+}
+
+// isHiddenProbe reports whether the request targets a dotfile (a path segment
+// starting with "."), as vulnerability scanners hunting for /.env, /.git, and
+// the like do. The legitimate /.well-known/ tree is excluded. These get an
+// empty 410 instead of the ~150 KB page.
+func isHiddenProbe(p string) bool {
+	if strings.HasPrefix(p, "/.well-known/") {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if len(seg) > 1 && seg[0] == '.' {
+			return true
+		}
+	}
+	return false
+}
+
 // isActivityPub reports whether the request is ActivityPub, by either the
 // Accept header (actor fetches) or the Content-Type header (inbox deliveries,
 // which are POSTed with application/activity+json and may not set Accept).
@@ -334,6 +356,10 @@ func main() {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("User-agent: *\nDisallow: /\n"))
+		case isHiddenProbe(r.URL.Path):
+			// Vulnerability scanners probing for dotfiles (.env, .git, …). Send
+			// an empty 410 rather than the ~150 KB page.
+			w.WriteHeader(http.StatusGone)
 		case isMediaRequest(r):
 			// Former bucket media: the client (an <img>/<video> tag or a
 			// server refetch) ignores any body, so send an empty 410.
@@ -370,6 +396,19 @@ func main() {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
 			w.Write([]byte(`{"error":"Gone"}` + "\n"))
+		case isFeedPath(r.URL.Path):
+			// Dead RSS/Atom feed: return the matching feed content type so
+			// readers recognise the 410 and stop polling. The body is empty.
+			if strings.HasSuffix(r.URL.Path, ".atom") {
+				w.Header().Set("Content-Type", "application/atom+xml; charset=utf-8")
+			} else {
+				w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+			}
+			w.WriteHeader(http.StatusGone)
+		case strings.HasPrefix(r.URL.Path, "/tags/"):
+			// Hashtag pages are crawler traffic, not human visits, so drop them
+			// with an empty 410 instead of the ~150 KB page.
+			w.WriteHeader(http.StatusGone)
 		default:
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
