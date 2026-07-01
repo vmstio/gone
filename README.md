@@ -38,6 +38,7 @@ JSON) — the status is always `410 Gone`:
 | Match                                             | Response body |
 |---------------------------------------------------|---------------|
 | Media request (see below)                         | empty body — the client discards it anyway |
+| Path `/.well-known/host-meta[.json]`              | empty body with `application/xrd+xml` (or `application/json` for the `.json` variant) — the WebFinger discovery document |
 | Path `/_matrix/…` or `/.well-known/matrix/…`      | Matrix error `{"errcode":"M_UNKNOWN","error":"…"}` (Matrix clients often send no `Accept`, so the path is the signal) |
 | `Accept: application/activity+json` or `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL |
 | `Accept: application/json` or `application/jrd+json`         | `{"error":"Gone"}` (covers WebFinger, API, NodeInfo clients) |

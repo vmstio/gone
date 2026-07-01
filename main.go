@@ -161,6 +161,13 @@ func isMatrixPath(p string) bool {
 	return strings.HasPrefix(p, "/_matrix/") || strings.HasPrefix(p, "/.well-known/matrix/")
 }
 
+// isHostMetaPath reports whether the request targets the host-meta discovery
+// document (RFC 6415) that bootstraps WebFinger. It is served as XRD XML by
+// default, with a JSON (JRD) variant at the .json suffix.
+func isHostMetaPath(p string) bool {
+	return p == "/.well-known/host-meta" || p == "/.well-known/host-meta.json"
+}
+
 // mediaExts are file extensions that a bucket of images/attachments would have
 // served. Requests for these get an empty 410 rather than a page body.
 var mediaExts = map[string]bool{
@@ -225,6 +232,16 @@ func main() {
 		case isMediaRequest(r):
 			// Former bucket media: the client (an <img>/<video> tag or a
 			// server refetch) ignores any body, so send an empty 410.
+			w.WriteHeader(http.StatusGone)
+		case isHostMetaPath(r.URL.Path):
+			// host-meta discovery. Honour the requested representation: JSON
+			// (JRD) for the .json variant, XRD XML otherwise. The body is empty
+			// since the status conveys everything the client needs.
+			if strings.HasSuffix(r.URL.Path, ".json") {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			} else {
+				w.Header().Set("Content-Type", "application/xrd+xml; charset=utf-8")
+			}
 			w.WriteHeader(http.StatusGone)
 		case isMatrixPath(r.URL.Path):
 			// Matrix standard error response shape. There is no dedicated
