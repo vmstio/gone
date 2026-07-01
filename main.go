@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 )
 
@@ -160,6 +161,36 @@ func isMatrixPath(p string) bool {
 	return strings.HasPrefix(p, "/_matrix/") || strings.HasPrefix(p, "/.well-known/matrix/")
 }
 
+// mediaExts are file extensions that a bucket of images/attachments would have
+// served. Requests for these get an empty 410 rather than a page body.
+var mediaExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
+	".avif": true, ".bmp": true, ".svg": true, ".ico": true, ".heic": true,
+	".tif": true, ".tiff": true,
+	".mp4": true, ".webm": true, ".mov": true, ".m4v": true, ".ogv": true,
+	".mp3": true, ".ogg": true, ".oga": true, ".m4a": true, ".wav": true, ".flac": true,
+}
+
+// isMediaRequest reports whether the request is for image/video/audio media,
+// as a decommissioned S3 bucket of attachments would receive. These are
+// <img>/<video> subresources or server-side refetches that discard any HTML
+// body, so they get an empty 410 to save bandwidth.
+//
+// A browser page navigation also lists image types in Accept (e.g.
+// "text/html,...,image/avif,image/webp"), so an Accept-based match only counts
+// when text/html is absent. The file extension is checked as a fallback for
+// clients that send no useful Accept header.
+func isMediaRequest(r *http.Request) bool {
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	if !strings.Contains(accept, "text/html") &&
+		(strings.Contains(accept, "image/") ||
+			strings.Contains(accept, "video/") ||
+			strings.Contains(accept, "audio/")) {
+		return true
+	}
+	return mediaExts[strings.ToLower(path.Ext(r.URL.Path))]
+}
+
 // renderPage fills the per-request domain into the cached template.
 func renderPage(domain string) []byte {
 	return []byte(strings.ReplaceAll(pageTpl, "__DOMAIN__", html.EscapeString(domain)))
@@ -186,7 +217,15 @@ func main() {
 	// federating servers receive JSON while browsers get the HTML page. The
 	// status is always 410.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// The resource is permanently gone, so let caches and crawlers hold on
+		// to the 410 and stop re-requesting. Applies to every branch below.
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+
 		switch {
+		case isMediaRequest(r):
+			// Former bucket media: the client (an <img>/<video> tag or a
+			// server refetch) ignores any body, so send an empty 410.
+			w.WriteHeader(http.StatusGone)
 		case isMatrixPath(r.URL.Path):
 			// Matrix standard error response shape. There is no dedicated
 			// "gone" errcode, so M_UNKNOWN carries a descriptive message.

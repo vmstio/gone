@@ -37,13 +37,30 @@ JSON) — the status is always `410 Gone`:
 
 | Match                                             | Response body |
 |---------------------------------------------------|---------------|
+| Media request (see below)                         | empty body — the client discards it anyway |
 | Path `/_matrix/…` or `/.well-known/matrix/…`      | Matrix error `{"errcode":"M_UNKNOWN","error":"…"}` (Matrix clients often send no `Accept`, so the path is the signal) |
 | `Accept: application/activity+json` or `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL |
 | `Accept: application/json` or `application/jrd+json`         | `{"error":"Gone"}` (covers WebFinger, API, NodeInfo clients) |
 | anything else (browsers)                          | the HTML page |
 
-This lets one deployment gracefully retire both a Mastodon/ActivityPub instance
-and a Matrix homeserver.
+All 410 responses carry `Cache-Control: public, max-age=86400` so caches and
+crawlers stop re-requesting a permanently gone resource.
+
+This lets one deployment gracefully retire a Mastodon/ActivityPub instance, a
+Matrix homeserver, and a media/attachment bucket at the same time.
+
+### Media (former S3 bucket) requests
+
+A bucket of images/attachments is requested by `<img>`/`<video>` tags and
+server-side refetches that ignore any HTML body, so serving the ~150 KB page
+for each would waste bandwidth. Such requests get an **empty 410** instead. A
+request counts as media when either:
+
+- the `Accept` header asks for `image/*`, `video/*`, or `audio/*` **and** does
+  not include `text/html` (so a normal browser page load, whose `Accept` also
+  lists image types, still gets the HTML page); or
+- the path ends in a known media extension (`.jpg`, `.png`, `.gif`, `.webp`,
+  `.mp4`, `.mp3`, …).
 
 Example ActivityPub actor fetch:
 
