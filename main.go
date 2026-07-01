@@ -357,114 +357,122 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
+// handleHealthz responds 200 for platform health checks. Kept separate so that
+// real traffic (all 410) never makes the health check fail.
+func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "ok")
+}
+
+// handleGone answers every non-health request with HTTP 410 Gone (except
+// /robots.txt). The response is chosen from the request path, headers, and
+// User-Agent so federating servers and API clients get compact machine-readable
+// bodies while human browsers get the HTML page.
+func handleGone(w http.ResponseWriter, r *http.Request) {
+	// The resource is permanently gone, so let caches and crawlers hold on
+	// to the 410 and stop re-requesting. Applies to every branch below.
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+
+	switch {
+	case r.URL.Path == "/robots.txt":
+		// Actively steer crawlers away. Unlike everything else this is a
+		// live 200 directive, not a 410.
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("User-agent: *\nDisallow: /\n"))
+	case isHiddenProbe(r.URL.Path):
+		// Vulnerability scanners probing for dotfiles (.env, .git, …). Send
+		// an empty 410 rather than the ~150 KB page.
+		w.WriteHeader(http.StatusGone)
+	case isMediaRequest(r):
+		// Former bucket media: the client (an <img>/<video> tag or a
+		// server refetch) ignores any body, so send an empty 410.
+		w.WriteHeader(http.StatusGone)
+	case isHostMetaPath(r.URL.Path):
+		// host-meta discovery. Honour the requested representation: JSON
+		// (JRD) for the .json variant, XRD XML otherwise. The body is empty
+		// since the status conveys everything the client needs.
+		if strings.HasSuffix(r.URL.Path, ".json") {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		} else {
+			w.Header().Set("Content-Type", "application/xrd+xml; charset=utf-8")
+		}
+		w.WriteHeader(http.StatusGone)
+	case isMatrixPath(r.URL.Path):
+		// Matrix standard error response shape. There is no dedicated
+		// "gone" errcode, so M_UNKNOWN carries a descriptive message.
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+		w.Write([]byte(`{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}` + "\n"))
+	case isInboxPath(r.URL.Path):
+		// Inbox delivery POSTs: the remote server only needs the 410 status
+		// to stop delivering, so skip the Tombstone body.
+		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+	case isActivityPub(r):
+		// ActivityStreams Tombstone: the canonical representation of a
+		// resource that once existed and is now permanently gone. Fetches
+		// of actors, statuses, etc. get the full object.
+		body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
+		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+		w.Write([]byte(body))
+	case isJSONPath(r.URL.Path),
+		wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
+		// Mastodon REST API, WebFinger / NodeInfo discovery, .json
+		// resources (all by path, any Accept), and generic JSON clients get
+		// a small JSON error instead of the ~150 KB HTML page.
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+		w.Write([]byte(`{"error":"Gone"}` + "\n"))
+	case isFeedPath(r.URL.Path):
+		// Dead RSS/Atom feed: return the matching feed content type so
+		// readers recognise the 410 and stop polling. The body is empty.
+		if strings.HasSuffix(r.URL.Path, ".atom") {
+			w.Header().Set("Content-Type", "application/atom+xml; charset=utf-8")
+		} else {
+			w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+		}
+		w.WriteHeader(http.StatusGone)
+	case strings.HasPrefix(r.URL.Path, "/tags/"):
+		// Hashtag pages are crawler traffic, not human visits, so drop them
+		// with an empty 410 instead of the ~150 KB page.
+		w.WriteHeader(http.StatusGone)
+	case isFediverseServerUA(r.UserAgent()):
+		// A known fediverse server that didn't send an explicit AP Accept
+		// (e.g. link-preview or generic fetch). Give it a Tombstone rather
+		// than the HTML page.
+		body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
+		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+		w.Write([]byte(body))
+	default:
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+		w.Write(renderPage(domainFromRequest(r)))
+	}
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	mux := http.NewServeMux()
-
-	// Health check endpoint returns 200 so platform health checks pass while
-	// all real traffic still receives 410. App Platform treats 410 as
-	// unhealthy, so point the service's health check at this path.
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
-	})
-
-	// Every other request gets HTTP 410 Gone. The body is chosen from the
-	// request path (Matrix APIs) and the Accept header (ActivityPub / JSON) so
-	// federating servers receive JSON while browsers get the HTML page. The
-	// status is always 410.
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// The resource is permanently gone, so let caches and crawlers hold on
-		// to the 410 and stop re-requesting. Applies to every branch below.
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-
-		switch {
-		case r.URL.Path == "/robots.txt":
-			// Actively steer crawlers away. Unlike everything else this is a
-			// live 200 directive, not a 410.
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("User-agent: *\nDisallow: /\n"))
-		case isHiddenProbe(r.URL.Path):
-			// Vulnerability scanners probing for dotfiles (.env, .git, …). Send
-			// an empty 410 rather than the ~150 KB page.
-			w.WriteHeader(http.StatusGone)
-		case isMediaRequest(r):
-			// Former bucket media: the client (an <img>/<video> tag or a
-			// server refetch) ignores any body, so send an empty 410.
-			w.WriteHeader(http.StatusGone)
-		case isHostMetaPath(r.URL.Path):
-			// host-meta discovery. Honour the requested representation: JSON
-			// (JRD) for the .json variant, XRD XML otherwise. The body is empty
-			// since the status conveys everything the client needs.
-			if strings.HasSuffix(r.URL.Path, ".json") {
-				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			} else {
-				w.Header().Set("Content-Type", "application/xrd+xml; charset=utf-8")
-			}
-			w.WriteHeader(http.StatusGone)
-		case isMatrixPath(r.URL.Path):
-			// Matrix standard error response shape. There is no dedicated
-			// "gone" errcode, so M_UNKNOWN carries a descriptive message.
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusGone)
-			w.Write([]byte(`{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}` + "\n"))
-		case isInboxPath(r.URL.Path):
-			// Inbox delivery POSTs: the remote server only needs the 410 status
-			// to stop delivering, so skip the Tombstone body.
-			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
-			w.WriteHeader(http.StatusGone)
-		case isActivityPub(r):
-			// ActivityStreams Tombstone: the canonical representation of a
-			// resource that once existed and is now permanently gone. Fetches
-			// of actors, statuses, etc. get the full object.
-			body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
-			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
-			w.WriteHeader(http.StatusGone)
-			w.Write([]byte(body))
-		case isJSONPath(r.URL.Path),
-			wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
-			// Mastodon REST API, WebFinger / NodeInfo discovery, .json
-			// resources (all by path, any Accept), and generic JSON clients get
-			// a small JSON error instead of the ~150 KB HTML page.
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusGone)
-			w.Write([]byte(`{"error":"Gone"}` + "\n"))
-		case isFeedPath(r.URL.Path):
-			// Dead RSS/Atom feed: return the matching feed content type so
-			// readers recognise the 410 and stop polling. The body is empty.
-			if strings.HasSuffix(r.URL.Path, ".atom") {
-				w.Header().Set("Content-Type", "application/atom+xml; charset=utf-8")
-			} else {
-				w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
-			}
-			w.WriteHeader(http.StatusGone)
-		case strings.HasPrefix(r.URL.Path, "/tags/"):
-			// Hashtag pages are crawler traffic, not human visits, so drop them
-			// with an empty 410 instead of the ~150 KB page.
-			w.WriteHeader(http.StatusGone)
-		case isFediverseServerUA(r.UserAgent()):
-			// A known fediverse server that didn't send an explicit AP Accept
-			// (e.g. link-preview or generic fetch). Give it a Tombstone rather
-			// than the HTML page.
-			body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
-			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
-			w.WriteHeader(http.StatusGone)
-			w.Write([]byte(body))
-		default:
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusGone)
-			w.Write(renderPage(domainFromRequest(r)))
+	// Route directly rather than through http.ServeMux, which 301-redirects
+	// paths it wants to "clean" — e.g. malformed media srcset URLs containing
+	// "//". Handling routing ourselves lets those get a direct 410.
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			handleHealthz(w, r)
+			return
 		}
+		handleGone(w, r)
 	})
 
-	var handler http.Handler = mux
+	var handler http.Handler = root
 	if os.Getenv("LOG_REQUESTS") != "false" {
-		handler = logRequests(mux)
+		handler = logRequests(root)
 	}
 
 	addr := ":" + port
