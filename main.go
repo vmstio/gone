@@ -410,12 +410,15 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 // User-Agent so federating servers and API clients get compact machine-readable
 // bodies while human browsers get the HTML page.
 func handleGone(w http.ResponseWriter, r *http.Request) {
-	// The resource is permanently gone, so let caches and crawlers hold on
-	// to the 410 and stop re-requesting. Applies to every branch below.
-	// Vary tells shared caches (e.g. Cloudflare) that the body differs by
-	// Accept/User-Agent/path, so a bot's empty-body response doesn't get
-	// served to a browser expecting the HTML page.
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	// The resource is permanently gone, so let the client hold on to the
+	// 410 and stop re-requesting. "private" (rather than "public") is
+	// deliberate: the body varies by Accept/User-Agent/path, and shared
+	// caches like Cloudflare don't key on Vary by default, so a public
+	// directive lets one client's response (e.g. a bot's empty body) get
+	// served to every other visitor. private confines caching to the
+	// requesting client, which does respect Vary. Applies to every branch
+	// below.
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	w.Header().Set("Vary", "Accept, User-Agent")
 
 	switch {
