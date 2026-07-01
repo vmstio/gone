@@ -412,7 +412,11 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 func handleGone(w http.ResponseWriter, r *http.Request) {
 	// The resource is permanently gone, so let caches and crawlers hold on
 	// to the 410 and stop re-requesting. Applies to every branch below.
+	// Vary tells shared caches (e.g. Cloudflare) that the body differs by
+	// Accept/User-Agent/path, so a bot's empty-body response doesn't get
+	// served to a browser expecting the HTML page.
 	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Vary", "Accept, User-Agent")
 
 	switch {
 	case r.URL.Path == "/robots.txt":
