@@ -257,6 +257,32 @@ func isFediverseServerUA(ua string) bool {
 	return false
 }
 
+// crawlerUAs are substrings identifying search-engine, SEO, and AI crawlers, as
+// well as link-preview fetchers. Matched case-insensitively. These get an empty
+// 410 instead of the HTML page — the 410 alone deindexes the URL.
+var crawlerUAs = []string{
+	"googlebot", "googleother", "google-inspectiontool", "storebot-google",
+	"bingbot", "bingpreview", "applebot", "yandexbot", "baiduspider",
+	"duckduckbot", "duckduckgo", "seznambot", "petalbot", "sogou", "slurp",
+	"claudebot", "anthropic", "gptbot", "oai-searchbot", "chatgpt-user",
+	"perplexitybot", "perplexity", "ccbot", "bytespider", "amazonbot",
+	"imagesiftbot", "diffbot", "timpibot", "youbot", "meta-externalagent",
+	"facebookexternalhit", "twitterbot", "linkedinbot", "pinterestbot",
+	"semrushbot", "ahrefsbot", "mj12bot", "dotbot", "dataforseobot",
+}
+
+// isSearchCrawlerUA reports whether the User-Agent identifies a search/AI
+// crawler or link-preview fetcher.
+func isSearchCrawlerUA(ua string) bool {
+	ua = strings.ToLower(ua)
+	for _, s := range crawlerUAs {
+		if strings.Contains(ua, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // mediaExts are file extensions that a bucket of images/attachments would have
 // served. Requests for these get an empty 410 rather than a page body.
 var mediaExts = map[string]bool{
@@ -446,6 +472,10 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
 		w.WriteHeader(http.StatusGone)
 		w.Write([]byte(body))
+	case isSearchCrawlerUA(r.UserAgent()):
+		// Search / AI crawlers and link-preview fetchers: skip the ~150 KB
+		// page; the 410 alone tells them to deindex the URL.
+		w.WriteHeader(http.StatusGone)
 	default:
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusGone)

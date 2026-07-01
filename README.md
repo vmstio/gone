@@ -48,7 +48,8 @@ from the request path and headers. Every response is `410 Gone` **except**
 | Path ending `.rss` / `.atom`                      | empty body with `application/rss+xml` / `application/atom+xml` — dead feed, so readers stop polling |
 | Path `/tags/…`                                    | empty body — hashtag pages are crawler traffic, not human visits |
 | `User-Agent` is a known fediverse server (Mastodon, Lemmy, Pleroma, Akkoma, Misskey, Iceshrimp, Sharkey, Pixelfed, PeerTube, Friendica, GoToSocial, snac, Fedify, relays, …) | ActivityStreams `Tombstone` — a fediverse server that fetched without an explicit AP `Accept` (link preview, generic GET) gets a machine-readable response instead of the HTML page |
-| anything else (browsers)                          | the HTML page |
+| `User-Agent` is a known search/AI crawler or link-preview fetcher (Googlebot, Bingbot, Applebot, ClaudeBot, GPTBot, DuckDuckBot, Yandex, Baidu, Bytespider, SEO bots, facebookexternalhit, Twitterbot, …) | empty body — the 410 alone deindexes the URL, so there's no point serving the ~150 KB page |
+| anything else (real browsers)                     | the HTML page |
 
 All 410 responses carry `Cache-Control: public, max-age=86400` so caches and
 crawlers stop re-requesting a permanently gone resource.
