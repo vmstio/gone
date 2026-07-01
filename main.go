@@ -227,6 +227,64 @@ func renderPage(domain string) []byte {
 	return []byte(strings.ReplaceAll(pageTpl, "__DOMAIN__", html.EscapeString(domain)))
 }
 
+// statusRecorder wraps http.ResponseWriter to capture the status code and the
+// number of body bytes written, for logging.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	n, err := r.ResponseWriter.Write(b)
+	r.bytes += n
+	return n, err
+}
+
+// clientIP returns the originating client address, preferring the first entry
+// of X-Forwarded-For (set by App Platform's proxy) over the direct RemoteAddr.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	return r.RemoteAddr
+}
+
+// logRequests logs one line per request so you can see what is being probed.
+// The response Content-Type indicates which branch matched. Health checks are
+// skipped to avoid drowning the log. Set LOG_REQUESTS=false to disable.
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		rec := &statusRecorder{ResponseWriter: w}
+		next.ServeHTTP(rec, r)
+		if rec.status == 0 {
+			rec.status = http.StatusOK
+		}
+		ct := rec.Header().Get("Content-Type")
+		if ct == "" {
+			ct = "-"
+		}
+		log.Printf("%d %s %s %dB ct=%q host=%q ip=%s ua=%q",
+			rec.status, r.Method, r.URL.RequestURI(), rec.bytes,
+			ct, rawHost(r), clientIP(r), r.UserAgent())
+	})
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -301,9 +359,14 @@ func main() {
 		}
 	})
 
+	var handler http.Handler = mux
+	if os.Getenv("LOG_REQUESTS") != "false" {
+		handler = logRequests(mux)
+	}
+
 	addr := ":" + port
 	log.Printf("gone listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatal(err)
 	}
 }

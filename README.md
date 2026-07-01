@@ -73,10 +73,26 @@ curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 # {"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":"https://your.domain/users/alice"}
 ```
 
+## Logging
+
+One line is logged per request (to stdout, where App Platform collects it) so
+you can see what is being probed. The Content-Type shows which branch matched:
+
+```
+410 GET /users/alice 112B ct="application/activity+json; charset=utf-8" host="fedi.example" ip=203.0.113.5 ua="TestBot/1.0"
+200 GET /robots.txt 26B ct="text/plain; charset=utf-8" host="example.com" ip=203.0.113.9 ua="Googlebot/2.1"
+```
+
+Fields: status, method, path, response bytes, `ct` (Content-Type), `host`
+(requested host), `ip` (first `X-Forwarded-For` entry, falling back to the
+remote address), and `ua` (User-Agent). Health checks (`/healthz`) are not
+logged. Set `LOG_REQUESTS=false` to disable request logging entirely.
+
 ## Endpoints
 
-- `/*` — returns `410 Gone`; body negotiated by `Accept` (see above).
-- `/healthz` — returns `200 OK` for platform health checks.
+- `/*` — returns `410 Gone`; response chosen by path/headers (see above).
+- `/robots.txt` — returns `200 OK` with a disallow-all directive.
+- `/healthz` — returns `200 OK` for platform health checks (not logged).
 
 ## Deploy to DigitalOcean App Platform
 
