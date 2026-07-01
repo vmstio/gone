@@ -153,6 +153,13 @@ func wantsAny(accept string, mediaTypes ...string) bool {
 	return false
 }
 
+// isMatrixPath reports whether the request targets a Matrix Client-Server or
+// Server-Server (federation) API, or Matrix delegation discovery. Matrix
+// clients often omit an Accept header, so the path is the reliable signal.
+func isMatrixPath(p string) bool {
+	return strings.HasPrefix(p, "/_matrix/") || strings.HasPrefix(p, "/.well-known/matrix/")
+}
+
 // renderPage fills the per-request domain into the cached template.
 func renderPage(domain string) []byte {
 	return []byte(strings.ReplaceAll(pageTpl, "__DOMAIN__", html.EscapeString(domain)))
@@ -174,11 +181,18 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 
-	// Every other request gets HTTP 410 Gone. The body is negotiated from the
-	// Accept header so federating ActivityPub servers receive JSON while
-	// browsers get the HTML page. The status is always 410.
+	// Every other request gets HTTP 410 Gone. The body is chosen from the
+	// request path (Matrix APIs) and the Accept header (ActivityPub / JSON) so
+	// federating servers receive JSON while browsers get the HTML page. The
+	// status is always 410.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case isMatrixPath(r.URL.Path):
+			// Matrix standard error response shape. There is no dedicated
+			// "gone" errcode, so M_UNKNOWN carries a descriptive message.
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
+			w.Write([]byte(`{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}` + "\n"))
 		case wantsAny(r.Header.Get("Accept"), "application/activity+json", "application/ld+json"):
 			// ActivityStreams Tombstone: the canonical representation of a
 			// resource that once existed and is now permanently gone.

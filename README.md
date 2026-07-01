@@ -30,15 +30,20 @@ curl -i http://localhost:8080/
 
 ## Content negotiation
 
-Since this is meant to stand in for a decommissioned Mastodon server, most
-traffic comes from other ActivityPub servers rather than browsers. The response
-body is negotiated from the `Accept` header — the status is always `410 Gone`:
+Since this is meant to stand in for a decommissioned federated server, most
+traffic comes from other servers rather than browsers. The response body is
+chosen from the request path (Matrix) and the `Accept` header (ActivityPub /
+JSON) — the status is always `410 Gone`:
 
-| Client `Accept`                                  | Response body |
-|--------------------------------------------------|---------------|
-| `application/activity+json`, `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL |
-| `application/json`, `application/jrd+json`         | `{"error":"Gone"}` (covers WebFinger, API, NodeInfo clients) |
+| Match                                             | Response body |
+|---------------------------------------------------|---------------|
+| Path `/_matrix/…` or `/.well-known/matrix/…`      | Matrix error `{"errcode":"M_UNKNOWN","error":"…"}` (Matrix clients often send no `Accept`, so the path is the signal) |
+| `Accept: application/activity+json` or `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL |
+| `Accept: application/json` or `application/jrd+json`         | `{"error":"Gone"}` (covers WebFinger, API, NodeInfo clients) |
 | anything else (browsers)                          | the HTML page |
+
+This lets one deployment gracefully retire both a Mastodon/ActivityPub instance
+and a Matrix homeserver.
 
 Example ActivityPub actor fetch:
 
