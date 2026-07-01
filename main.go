@@ -168,6 +168,30 @@ func isHostMetaPath(p string) bool {
 	return p == "/.well-known/host-meta" || p == "/.well-known/host-meta.json"
 }
 
+// isNodeInfoPath reports whether the request targets NodeInfo discovery or a
+// NodeInfo document. Fediverse crawlers and stats sites probe these heavily,
+// often without a useful Accept header, so the path is the signal.
+func isNodeInfoPath(p string) bool {
+	return p == "/.well-known/nodeinfo" ||
+		p == "/.well-known/x-nodeinfo2" ||
+		strings.HasPrefix(p, "/nodeinfo/")
+}
+
+// isJSONDiscoveryPath reports whether the request targets a fediverse JSON
+// discovery endpoint (WebFinger or NodeInfo) that should answer with JSON
+// regardless of the Accept header.
+func isJSONDiscoveryPath(p string) bool {
+	return p == "/.well-known/webfinger" || isNodeInfoPath(p)
+}
+
+// isActivityPub reports whether the request is ActivityPub, by either the
+// Accept header (actor fetches) or the Content-Type header (inbox deliveries,
+// which are POSTed with application/activity+json and may not set Accept).
+func isActivityPub(r *http.Request) bool {
+	return wantsAny(r.Header.Get("Accept"), "application/activity+json", "application/ld+json") ||
+		wantsAny(r.Header.Get("Content-Type"), "application/activity+json", "application/ld+json")
+}
+
 // mediaExts are file extensions that a bucket of images/attachments would have
 // served. Requests for these get an empty 410 rather than a page body.
 var mediaExts = map[string]bool{
@@ -229,6 +253,12 @@ func main() {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 
 		switch {
+		case r.URL.Path == "/robots.txt":
+			// Actively steer crawlers away. Unlike everything else this is a
+			// live 200 directive, not a 410.
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("User-agent: *\nDisallow: /\n"))
 		case isMediaRequest(r):
 			// Former bucket media: the client (an <img>/<video> tag or a
 			// server refetch) ignores any body, so send an empty 410.
@@ -249,15 +279,18 @@ func main() {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
 			w.Write([]byte(`{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}` + "\n"))
-		case wantsAny(r.Header.Get("Accept"), "application/activity+json", "application/ld+json"):
+		case isActivityPub(r):
 			// ActivityStreams Tombstone: the canonical representation of a
-			// resource that once existed and is now permanently gone.
+			// resource that once existed and is now permanently gone. Also
+			// answers inbox delivery POSTs so remote servers stop delivering.
 			body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
 			w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
 			w.Write([]byte(body))
-		case wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
-			// Generic API / WebFinger clients get a small JSON error.
+		case isJSONDiscoveryPath(r.URL.Path),
+			wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
+			// WebFinger / NodeInfo discovery (by path, any Accept) and generic
+			// JSON API clients get a small JSON error.
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusGone)
 			w.Write([]byte(`{"error":"Gone"}` + "\n"))

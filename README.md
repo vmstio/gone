@@ -31,17 +31,18 @@ curl -i http://localhost:8080/
 ## Content negotiation
 
 Since this is meant to stand in for a decommissioned federated server, most
-traffic comes from other servers rather than browsers. The response body is
-chosen from the request path (Matrix) and the `Accept` header (ActivityPub /
-JSON) — the status is always `410 Gone`:
+traffic comes from other servers rather than browsers. The response is chosen
+from the request path and headers. Every response is `410 Gone` **except**
+`robots.txt`, which is a live `200` directive:
 
-| Match                                             | Response body |
-|---------------------------------------------------|---------------|
+| Match (in order)                                  | Response |
+|---------------------------------------------------|----------|
+| Path `/robots.txt`                                | `200` `text/plain` — `User-agent: *` / `Disallow: /`, to steer crawlers away |
 | Media request (see below)                         | empty body — the client discards it anyway |
-| Path `/.well-known/host-meta[.json]`              | empty body with `application/xrd+xml` (or `application/json` for the `.json` variant) — the WebFinger discovery document |
+| Path `/.well-known/host-meta[.json]`              | empty body with `application/xrd+xml` (or `application/json` for the `.json` variant) — WebFinger discovery document |
 | Path `/_matrix/…` or `/.well-known/matrix/…`      | Matrix error `{"errcode":"M_UNKNOWN","error":"…"}` (Matrix clients often send no `Accept`, so the path is the signal) |
-| `Accept: application/activity+json` or `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL |
-| `Accept: application/json` or `application/jrd+json`         | `{"error":"Gone"}` (covers WebFinger, API, NodeInfo clients) |
+| ActivityPub: `Accept` **or** `Content-Type` is `application/activity+json` / `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL. `Content-Type` matching means inbox delivery POSTs get a proper AP response and remote servers stop delivering. |
+| Path `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/…`, or `Accept: application/json` / `application/jrd+json` | `{"error":"Gone"}` (WebFinger / NodeInfo discovery by path regardless of `Accept`, plus generic JSON API clients) |
 | anything else (browsers)                          | the HTML page |
 
 All 410 responses carry `Cache-Control: public, max-age=86400` so caches and
