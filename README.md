@@ -19,6 +19,15 @@ The displayed domain is taken from the request (`X-Forwarded-Host`, falling
 back to `Host`, with any port stripped and the value HTML-escaped), so a single
 deployment can serve any number of domains.
 
+Example ActivityPub actor fetch:
+
+```sh
+curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
+# HTTP/1.1 410 Gone
+# Content-Type: application/activity+json; charset=utf-8
+# {"error":"Gone"}
+```
+
 ## Run locally
 
 ```sh
@@ -101,15 +110,6 @@ request counts as media when any of:
 - the `Accept` header asks for `image/*`, `video/*`, or `audio/*` **and** does
   not include `text/html` (so a normal browser page load, whose `Accept` also
   lists image types, still gets the HTML page).
-
-Example ActivityPub actor fetch:
-
-```sh
-curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
-# HTTP/1.1 410 Gone
-# Content-Type: application/activity+json; charset=utf-8
-# {"error":"Gone"}
-```
 
 ## Logging
 
