@@ -44,18 +44,14 @@ from the request path and headers, checked in this order. Every response is
 flowchart TD
     A["Request"] --> B{"/robots.txt ?"}
     B -- yes --> B1["200 text/plain\nUser-agent: * / Disallow: /"]
-    B -- no --> C{"Dotfile probe?\n(path segment starts with .\nexcl. /.well-known/…)"}
+    B -- no --> C{"Dotfile probe or media request?\n(path segment starts with .,\nexcl. /.well-known/…;\nsee Media section)"}
     C -- yes --> C1["410, empty body"]
-    C -- no --> D{"Media request?\n(see Media section)"}
-    D -- yes --> D1["410, empty body"]
-    D -- no --> E{"/.well-known/host-meta[.json] ?"}
+    C -- no --> E{"/.well-known/host-meta[.json] ?"}
     E -- yes --> E1["410 XRD/JRD error\nxrd+xml or json"]
     E -- no --> F{"Matrix?\n/_matrix/… or\n/.well-known/matrix/…"}
     F -- yes --> F1["410 Matrix error JSON\n{errcode: M_UNKNOWN}"]
-    F -- no --> G{"ActivityPub inbox?\npath ends /inbox"}
-    G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json"]
-    G -- no --> H{"ActivityPub?\nAccept or Content-Type is\nactivity+json / ld+json"}
-    H -- yes --> H1["410 {#quot;error#quot;:#quot;Gone#quot;}"]
+    F -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\nactivity+json / ld+json"}
+    H -- yes --> H1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json"]
     H -- no --> I{"JSON API / discovery path?\n/api/…, webfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: json"}
     I -- yes --> I1["410 {#quot;error#quot;:#quot;Gone#quot;}"]
     I -- no --> J{"Feed?\npath ends .rss / .atom"}
