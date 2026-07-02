@@ -87,10 +87,13 @@ body {
 <h1>__DOMAIN__ is HTTP 410 (Gone)</h1>
 </div>
 </div>
+<canvas id="illustration-overlay" style="position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:9999;"></canvas>
 <script>
 (function () {
   var canvas = document.getElementById('illustration');
   var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('illustration-overlay');
+  var octx = overlay.getContext('2d');
   var img = new Image();
   img.src = 'data:image/svg+xml;base64,__LOGO_DATA__';
 
@@ -118,16 +121,25 @@ body {
           w: Math.min(tileSize, canvas.width - x * tileSize),
           h: Math.min(tileSize, canvas.height - y * tileSize),
           delay: (x / cols) * 0.5 + Math.random() * 0.3,
-          dx: (Math.random() - 0.2) * 90,
-          dy: -Math.random() * 110 - 20,
+          dx: (Math.random() - 0.2) * (window.innerWidth * 0.6),
+          dy: -Math.random() * (window.innerHeight * 0.7) - 40,
           rot: (Math.random() - 0.5) * 1.4
         });
       }
     }
   }
 
+  function resizeOverlay() {
+    overlay.width = window.innerWidth;
+    overlay.height = window.innerHeight;
+  }
+
   function drawFrame() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    var rect = canvas.getBoundingClientRect();
+    var displayScale = rect.width / canvas.width;
+    var originX = rect.left, originY = rect.top;
     for (var i = 0; i < tiles.length; i++) {
       var t = tiles[i];
       var span = 1 - t.delay;
@@ -138,12 +150,16 @@ body {
         ctx.drawImage(img, t.x / RENDER_SCALE, t.y / RENDER_SCALE, t.w / RENDER_SCALE, t.h / RENDER_SCALE, t.x, t.y, t.w, t.h);
         continue;
       }
-      ctx.save();
-      ctx.globalAlpha = 1 - p;
-      ctx.translate(t.x + t.w / 2 + t.dx * p, t.y + t.h / 2 + t.dy * p);
-      ctx.rotate(t.rot * p);
-      ctx.drawImage(img, t.x / RENDER_SCALE, t.y / RENDER_SCALE, t.w / RENDER_SCALE, t.h / RENDER_SCALE, -t.w / 2, -t.h / 2, t.w, t.h);
-      ctx.restore();
+      octx.save();
+      octx.globalAlpha = 1 - p;
+      octx.translate(
+        originX + (t.x + t.w / 2) * displayScale + t.dx * p,
+        originY + (t.y + t.h / 2) * displayScale + t.dy * p
+      );
+      octx.rotate(t.rot * p);
+      var dw = t.w * displayScale, dh = t.h * displayScale;
+      octx.drawImage(img, t.x / RENDER_SCALE, t.y / RENDER_SCALE, t.w / RENDER_SCALE, t.h / RENDER_SCALE, -dw / 2, -dh / 2, dw, dh);
+      octx.restore();
     }
   }
 
@@ -177,9 +193,16 @@ body {
   img.onload = function () {
     canvas.width = img.naturalWidth * RENDER_SCALE;
     canvas.height = img.naturalHeight * RENDER_SCALE;
+    resizeOverlay();
     buildTiles();
     drawFrame();
   };
+
+  window.addEventListener('resize', function () {
+    resizeOverlay();
+    buildTiles();
+    drawFrame();
+  });
 
   canvas.addEventListener('mouseenter', function () { setTarget(1); });
   canvas.addEventListener('mouseleave', function () { setTarget(0); });
@@ -219,16 +242,6 @@ func domainFromRequest(r *http.Request) string {
 		return defaultDomain
 	}
 	return host
-}
-
-// requestURL reconstructs the absolute URL that was requested, used as the id
-// of the ActivityPub Tombstone. It trusts the proxy's forwarding headers.
-func requestURL(r *http.Request) string {
-	scheme := r.Header.Get("X-Forwarded-Proto")
-	if scheme == "" {
-		scheme = "https"
-	}
-	return scheme + "://" + rawHost(r) + r.URL.RequestURI()
 }
 
 // wantsAny reports whether the Accept header mentions any of the given media
@@ -495,14 +508,18 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusGone)
 	case isHostMetaPath(r.URL.Path):
 		// host-meta discovery. Honour the requested representation: JSON
-		// (JRD) for the .json variant, XRD XML otherwise. The body is empty
-		// since the status conveys everything the client needs.
+		// (JRD) for the .json variant, XRD XML otherwise. Same "Gone" signal
+		// as the WebFinger/NodeInfo JSON body below, just in each format.
 		if strings.HasSuffix(r.URL.Path, ".json") {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
+			w.Write([]byte(`{"error":"Gone"}` + "\n"))
 		} else {
 			w.Header().Set("Content-Type", "application/xrd+xml; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
+			w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
+				`<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0"><Property type="error">Gone</Property></XRD>` + "\n"))
 		}
-		w.WriteHeader(http.StatusGone)
 	case isMatrixPath(r.URL.Path):
 		// Matrix standard error response shape. There is no dedicated
 		// "gone" errcode, so M_UNKNOWN carries a descriptive message.
@@ -510,18 +527,21 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusGone)
 		w.Write([]byte(`{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}` + "\n"))
 	case isInboxPath(r.URL.Path):
-		// Inbox delivery POSTs: the remote server only needs the 410 status
-		// to stop delivering, so skip the Tombstone body.
+		// Inbox delivery POSTs: skip the Tombstone body (the remote server
+		// only needs the 410 status to stop delivering) but match real
+		// Mastodon's self-destruct-mode response, which answers inbox
+		// deliveries with the same JSON error as its other API/JSON routes.
 		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
 		w.WriteHeader(http.StatusGone)
+		w.Write([]byte(`{"error":"Gone"}` + "\n"))
 	case isActivityPub(r):
-		// ActivityStreams Tombstone: the canonical representation of a
-		// resource that once existed and is now permanently gone. Fetches
-		// of actors, statuses, etc. get the full object.
-		body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
+		// Actor/status fetches. Real Mastodon only branches on the 410
+		// status when dereferencing (it parses the body solely on 200), so
+		// the same plain JSON error as the API/discovery case below is
+		// enough — no AP client needs an ActivityStreams Tombstone body.
 		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
 		w.WriteHeader(http.StatusGone)
-		w.Write([]byte(body))
+		w.Write([]byte(`{"error":"Gone"}` + "\n"))
 	case isJSONPath(r.URL.Path),
 		wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
 		// Mastodon REST API, WebFinger / NodeInfo discovery, .json

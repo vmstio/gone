@@ -49,13 +49,13 @@ flowchart TD
     C -- no --> D{"Media request?\n(see Media section)"}
     D -- yes --> D1["410, empty body"]
     D -- no --> E{"/.well-known/host-meta[.json] ?"}
-    E -- yes --> E1["410, empty body\napplication/xrd+xml or json"]
+    E -- yes --> E1["410 XRD/JRD error\nxrd+xml or json"]
     E -- no --> F{"Matrix?\n/_matrix/… or\n/.well-known/matrix/…"}
     F -- yes --> F1["410 Matrix error JSON\n{errcode: M_UNKNOWN}"]
     F -- no --> G{"ActivityPub inbox?\npath ends /inbox"}
-    G -- yes --> G1["410, empty body\napplication/activity+json"]
+    G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json"]
     G -- no --> H{"ActivityPub?\nAccept or Content-Type is\nactivity+json / ld+json"}
-    H -- yes --> H1["410 ActivityStreams Tombstone"]
+    H -- yes --> H1["410 {#quot;error#quot;:#quot;Gone#quot;}"]
     H -- no --> I{"JSON API / discovery path?\n/api/…, webfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: json"}
     I -- yes --> I1["410 {#quot;error#quot;:#quot;Gone#quot;}"]
     I -- no --> J{"Feed?\npath ends .rss / .atom"}
@@ -70,10 +70,13 @@ notes that don't fit in the diagram:
 
 - **Media** requests are covered in [Media](#media-former-s3-bucket-requests)
   below.
-- **ActivityPub inbox** gets an empty body (not the Tombstone) because
-  federation delivery POSTs only need the 410 status to stop delivering.
+- **ActivityPub inbox** and **ActivityPub** actor/status fetches both get the
+  same plain JSON error as JSON API and discovery below — real Mastodon only
+  branches on the `410` status when dereferencing (it parses the response
+  body solely on `200`), so an ActivityStreams `Tombstone` object buys
+  nothing over a generic error body.
 - **ActivityPub** `Content-Type` matching also covers AP POSTs that aren't to
-  an inbox; the `Tombstone`'s `id` is the requested URL.
+  an inbox.
 - **JSON API and discovery** is matched **by path**, since these clients
   (apps, scrapers, OAuth libraries) often send a browser-style `Accept` or
   none at all. `/api/…` is the Mastodon REST API and the highest-volume
@@ -111,7 +114,7 @@ Example ActivityPub actor fetch:
 curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 # HTTP/1.1 410 Gone
 # Content-Type: application/activity+json; charset=utf-8
-# {"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":"https://your.domain/users/alice"}
+# {"error":"Gone"}
 ```
 
 ## Logging
