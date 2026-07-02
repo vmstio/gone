@@ -476,6 +476,31 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "ok")
 }
 
+// jsonGoneBody is the small JSON error shared by every branch that answers
+// JSON/ActivityPub clients: WebFinger/NodeInfo/OAuth discovery, the Mastodon
+// REST API, host-meta.json, and ActivityPub inbox/actor/status requests.
+// Real Mastodon's self-destruct mode answers all of these identically, and
+// its dereferencer only branches on the 410 status (it parses the response
+// body solely on 200), so there's no reason to vary the body by client.
+const jsonGoneBody = `{"error":"Gone"}` + "\n"
+
+// xrdGoneBody is jsonGoneBody's XRD/XML equivalent, for host-meta's default
+// (non-.json) representation.
+const xrdGoneBody = `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
+	`<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0"><Property type="error">Gone</Property></XRD>` + "\n"
+
+// writeGone writes a 410 response with the given Content-Type and body.
+// An empty contentType or body is skipped, leaving no body written.
+func writeGone(w http.ResponseWriter, contentType, body string) {
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.WriteHeader(http.StatusGone)
+	if body != "" {
+		w.Write([]byte(body))
+	}
+}
+
 // handleGone answers every non-health request with HTTP 410 Gone (except
 // /robots.txt). The response is chosen from the request path and headers so
 // federating servers and API clients get compact machine-readable bodies
@@ -498,71 +523,43 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("User-agent: *\nDisallow: /\n"))
-	case isHiddenProbe(r.URL.Path):
-		// Vulnerability scanners probing for dotfiles (.env, .git, …). Send
-		// an empty 410 rather than the ~150 KB page.
-		w.WriteHeader(http.StatusGone)
-	case isMediaRequest(r):
-		// Former bucket media: the client (an <img>/<video> tag or a
-		// server refetch) ignores any body, so send an empty 410.
-		w.WriteHeader(http.StatusGone)
+	case isHiddenProbe(r.URL.Path), isMediaRequest(r):
+		// Vulnerability scanners probing for dotfiles (.env, .git, …) and
+		// former bucket media (an <img>/<video> tag or a server refetch,
+		// which ignores any body) both get an empty 410 rather than the
+		// ~150 KB page.
+		writeGone(w, "", "")
 	case isHostMetaPath(r.URL.Path):
 		// host-meta discovery. Honour the requested representation: JSON
-		// (JRD) for the .json variant, XRD XML otherwise. Same "Gone" signal
-		// as the WebFinger/NodeInfo JSON body below, just in each format.
+		// (JRD) for the .json variant, XRD XML otherwise.
 		if strings.HasSuffix(r.URL.Path, ".json") {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusGone)
-			w.Write([]byte(`{"error":"Gone"}` + "\n"))
+			writeGone(w, "application/json; charset=utf-8", jsonGoneBody)
 		} else {
-			w.Header().Set("Content-Type", "application/xrd+xml; charset=utf-8")
-			w.WriteHeader(http.StatusGone)
-			w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
-				`<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0"><Property type="error">Gone</Property></XRD>` + "\n"))
+			writeGone(w, "application/xrd+xml; charset=utf-8", xrdGoneBody)
 		}
 	case isMatrixPath(r.URL.Path):
 		// Matrix standard error response shape. There is no dedicated
 		// "gone" errcode, so M_UNKNOWN carries a descriptive message.
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusGone)
-		w.Write([]byte(`{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}` + "\n"))
-	case isInboxPath(r.URL.Path):
-		// Inbox delivery POSTs: skip the Tombstone body (the remote server
-		// only needs the 410 status to stop delivering) but match real
-		// Mastodon's self-destruct-mode response, which answers inbox
-		// deliveries with the same JSON error as its other API/JSON routes.
-		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
-		w.WriteHeader(http.StatusGone)
-		w.Write([]byte(`{"error":"Gone"}` + "\n"))
-	case isActivityPub(r):
-		// Actor/status fetches. Real Mastodon only branches on the 410
-		// status when dereferencing (it parses the body solely on 200), so
-		// the same plain JSON error as the API/discovery case below is
-		// enough — no AP client needs an ActivityStreams Tombstone body.
-		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
-		w.WriteHeader(http.StatusGone)
-		w.Write([]byte(`{"error":"Gone"}` + "\n"))
+		writeGone(w, "application/json; charset=utf-8", `{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}`+"\n")
+	case isInboxPath(r.URL.Path), isActivityPub(r):
+		// Inbox delivery POSTs (by path, since they may lack Accept) and
+		// actor/status fetches (by Accept or Content-Type) both get the
+		// same JSON error as the API/discovery case below.
+		writeGone(w, "application/activity+json; charset=utf-8", jsonGoneBody)
 	case isJSONPath(r.URL.Path),
 		wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
 		// Mastodon REST API, WebFinger / NodeInfo discovery, .json
 		// resources (all by path, any Accept), and generic JSON clients get
 		// a small JSON error instead of the ~150 KB HTML page.
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusGone)
-		w.Write([]byte(`{"error":"Gone"}` + "\n"))
+		writeGone(w, "application/json; charset=utf-8", jsonGoneBody)
 	case isFeedPath(r.URL.Path):
 		// Dead RSS/Atom feed: return the matching feed content type so
 		// readers recognise the 410 and stop polling. The body is empty.
 		if strings.HasSuffix(r.URL.Path, ".atom") {
-			w.Header().Set("Content-Type", "application/atom+xml; charset=utf-8")
+			writeGone(w, "application/atom+xml; charset=utf-8", "")
 		} else {
-			w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+			writeGone(w, "application/rss+xml; charset=utf-8", "")
 		}
-		w.WriteHeader(http.StatusGone)
-	case strings.HasPrefix(r.URL.Path, "/tags/"):
-		// Hashtag pages are crawler traffic, not human visits, so drop them
-		// with an empty 410 instead of the ~150 KB page.
-		w.WriteHeader(http.StatusGone)
 	default:
 		writeHTML(w, r, http.StatusGone, renderPage(domainFromRequest(r)))
 	}

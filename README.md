@@ -60,9 +60,7 @@ flowchart TD
     I -- yes --> I1["410 {#quot;error#quot;:#quot;Gone#quot;}"]
     I -- no --> J{"Feed?\npath ends .rss / .atom"}
     J -- yes --> J1["410, empty body\nrss+xml / atom+xml"]
-    J -- no --> K{"/tags/… ?"}
-    K -- yes --> K1["410, empty body"]
-    K -- no --> L["410, HTML page"]
+    J -- no --> L["410, HTML page"]
 ```
 
 Every branch returns `410 Gone` except `/robots.txt`, which is a live `200`. A few
@@ -84,8 +82,8 @@ notes that don't fit in the diagram:
   is the single biggest bandwidth saving. `/oauth/authorize` is deliberately
   excluded from the OAuth endpoints, since it's the interactive browser login
   page and still gets the HTML page.
-- **Feed** and **`/tags/…`** matches are dead ends for readers/crawlers that
-  would otherwise keep polling or scraping.
+- **Feed** matches are a dead end for readers that would otherwise keep
+  polling.
 
 All 410 responses carry `Cache-Control: private, max-age=86400` so the
 requesting client holds on to the 410 and stops re-requesting a permanently
