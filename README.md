@@ -13,7 +13,7 @@ at a higher resolution than its intrinsic size (for crisp display) and
 disintegrates into flying, fading tiles on hover/click — a "Thanos snap"
 effect. Dark mode follows the browser's `prefers-color-scheme`.
 
-The HTML page is ~7.5 KB (~3.6 KB gzipped).
+The HTML page is ~9 KB (~4.2 KB gzipped).
 
 The displayed domain is taken from the request (`X-Forwarded-Host`, falling
 back to `Host`, with any port stripped and the value HTML-escaped), so a single
@@ -53,7 +53,7 @@ from the request path and headers, checked in this order. Every response is
 flowchart TD
     A["Request"] --> B{"/robots.txt ?"}
     B -- yes --> B1["200 text/plain\nUser-agent: * / Disallow: /"]
-    B -- no --> C{"Dotfile probe or media request?\n(path segment starts with .,\nexcl. /.well-known/…;\nsee Media section)"}
+    B -- no --> C{"Dotfile probe, WordPress probe,\nor media request?\n410, empty body"}
     C -- yes --> C1["410, empty body"]
     C -- no --> E{"/.well-known/host-meta[.json] ?"}
     E -- yes --> E1["410, empty body\nxrd+xml or json"]
@@ -67,7 +67,9 @@ flowchart TD
     I -- yes --> I1["410, empty body\njson"]
     I -- no --> J{"Feed?\npath ends .rss / .atom"}
     J -- yes --> J1["410, empty body\nrss+xml / atom+xml"]
-    J -- no --> L["410, HTML page"]
+    J -- no --> K{"/tags/… ?"}
+    K -- yes --> K1["410, empty body"]
+    K -- no --> L["410, HTML page"]
 ```
 
 Every branch returns `410 Gone` except `/robots.txt`, which is a live `200`. A few
@@ -91,12 +93,13 @@ A few more notes that don't fit in the diagram:
 - **Mastodon REST API and JSON discovery** are both matched **by path**,
   since these clients (apps, scrapers, OAuth libraries) often send a
   browser-style `Accept` or none at all. `/api/…` is the highest-volume
-  traffic this server sees, so a 17-byte JSON body instead of the ~15 KB page
+  traffic this server sees, so a 17-byte JSON body instead of the ~9 KB page
   is the single biggest bandwidth saving. `/oauth/authorize` is deliberately
   excluded from the OAuth endpoints, since it's the interactive browser login
   page and still gets the HTML page.
 - **Feed** matches are a dead end for readers that would otherwise keep
   polling.
+- **`/tags/…`** matches are a dead end for crawlers, not human visits.
 
 All 410 responses carry `Cache-Control: private, max-age=86400` so the
 requesting client holds on to the 410 and stops re-requesting a permanently
@@ -106,7 +109,7 @@ bot's empty body) to every other visitor.
 ### Media (former S3 bucket) requests
 
 A bucket of images/attachments is requested by `<img>`/`<video>` tags and
-server-side refetches that ignore any HTML body, so serving the ~7.5 KB page
+server-side refetches that ignore any HTML body, so serving the ~9 KB page
 for each would waste bandwidth. Such requests get an **empty 410** instead. A
 request counts as media when any of:
 

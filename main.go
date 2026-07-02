@@ -345,13 +345,32 @@ func isFeedPath(p string) bool {
 // isHiddenProbe reports whether the request targets a dotfile (a path segment
 // starting with "."), as vulnerability scanners hunting for /.env, /.git, and
 // the like do. The legitimate /.well-known/ tree is excluded. These get an
-// empty 410 instead of the ~150 KB page.
+// empty 410 instead of the ~9 KB page.
 func isHiddenProbe(p string) bool {
 	if strings.HasPrefix(p, "/.well-known/") {
 		return false
 	}
 	for _, seg := range strings.Split(p, "/") {
 		if len(seg) > 1 && seg[0] == '.' {
+			return true
+		}
+	}
+	return false
+}
+
+// wordPressProbeStrings are path substrings that only ever appear in
+// vulnerability scanner traffic hunting for known WordPress exploits — this
+// server has never run WordPress.
+var wordPressProbeStrings = []string{
+	"wp-includes", "wp-admin", "wp-content", "wp-login.php",
+	"xmlrpc.php", "wp-json", "wp-config", "wp-cron.php",
+}
+
+// isWordPressProbe reports whether the request targets a WordPress path.
+// These get an empty 410 instead of the ~9 KB page.
+func isWordPressProbe(p string) bool {
+	for _, s := range wordPressProbeStrings {
+		if strings.Contains(p, s) {
 			return true
 		}
 	}
@@ -540,11 +559,11 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("User-agent: *\nDisallow: /\n"))
-	case isHiddenProbe(r.URL.Path), isMediaRequest(r):
-		// Vulnerability scanners probing for dotfiles (.env, .git, …) and
-		// former bucket media (an <img>/<video> tag or a server refetch,
-		// which ignores any body) both get an empty 410 rather than the
-		// ~150 KB page.
+	case isHiddenProbe(r.URL.Path), isWordPressProbe(r.URL.Path), isMediaRequest(r):
+		// Vulnerability scanners probing for dotfiles (.env, .git, …) or
+		// WordPress internals (wp-includes), and former bucket media (an
+		// <img>/<video> tag or a server refetch, which ignores any body),
+		// all get an empty 410 rather than the ~9 KB page.
 		writeGone(w, "", "")
 	case isHostMetaPath(r.URL.Path):
 		// host-meta discovery, fetched programmatically. Keep the requested
@@ -585,6 +604,10 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 		} else {
 			writeGone(w, "application/rss+xml; charset=utf-8", "")
 		}
+	case strings.HasPrefix(r.URL.Path, "/tags/"):
+		// Hashtag pages are crawler traffic, not human visits, so drop them
+		// with an empty 410 instead of the ~9 KB page.
+		writeGone(w, "", "")
 	default:
 		writeHTML(w, r, http.StatusGone, renderPage(domainFromRequest(r)))
 	}
