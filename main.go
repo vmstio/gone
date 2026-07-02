@@ -317,72 +317,6 @@ func isActivityPub(r *http.Request) bool {
 		wantsAny(r.Header.Get("Content-Type"), "application/activity+json", "application/ld+json")
 }
 
-// fediverseUAs are substrings identifying known fediverse server software and
-// relays. Matched case-insensitively against the User-Agent so servers that
-// fetch without an explicit ActivityPub Accept (link previews, generic GETs)
-// still get a machine-readable response instead of the HTML page.
-var fediverseUAs = []string{
-	"mastodon", "pleroma", "akkoma", "misskey", "iceshrimp", "sharkey",
-	"lemmy", "pixelfed", "peertube", "friendica", "gotosocial",
-	"snac", "fedify", "bookwyrm", "mobilizon", "writefreely",
-	"hubzilla", "honk", "microblog.pub", "wildebeest",
-	"activity-relay", "activityrelay", "activitypub",
-	"joinmastodon", "fedi.buzz",
-	"kbin", "mbin", "firefish", "calckey", "foundkey",
-	"wordpress", "ghost", "discourse",
-	"funkwhale", "owncast", "castopod", "takahe", "bonfire",
-	"gancio", "epicyon", "mitra", "socialhome", "plume",
-	"guppe", "soapbox", "rebased", "vocata", "wafrn",
-}
-
-// isFediverseServerUA reports whether the User-Agent identifies a known
-// fediverse server or relay.
-func isFediverseServerUA(ua string) bool {
-	ua = strings.ToLower(ua)
-	for _, s := range fediverseUAs {
-		if strings.Contains(ua, s) {
-			return true
-		}
-	}
-	return false
-}
-
-// crawlerUAs are substrings identifying search-engine, SEO, and AI crawlers, as
-// well as link-preview fetchers. Matched case-insensitively. These get an empty
-// 410 instead of the HTML page — the 410 alone deindexes the URL.
-var crawlerUAs = []string{
-	"googlebot", "googleother", "google-inspectiontool", "storebot-google",
-	"google-extended",
-	"bingbot", "bingpreview", "msnbot", "applebot", "applebot-extended",
-	"yandexbot", "baiduspider", "duckduckbot", "duckduckgo",
-	"seznambot", "petalbot", "sogou", "slurp", "yeti", "coccocbot",
-	"exabot", "teoma", "ia_archiver", "archive.org_bot", "mojeekbot",
-	"qwantify",
-	"claudebot", "anthropic", "gptbot", "oai-searchbot", "chatgpt-user",
-	"perplexitybot", "perplexity", "perplexity-user", "ccbot", "bytespider",
-	"amazonbot", "imagesiftbot", "diffbot", "timpibot", "youbot",
-	"meta-externalagent", "meta-externalfetcher", "cohere-ai",
-	"cohere-training-data-crawler", "mistralai-user", "mistralai",
-	"omgili", "omgilibot", "kagibot",
-	"facebookexternalhit", "twitterbot", "linkedinbot", "pinterestbot",
-	"slackbot", "discordbot", "telegrambot", "whatsapp",
-	"skypeuripreview", "redditbot", "embedly", "vkshare",
-	"semrushbot", "ahrefsbot", "mj12bot", "dotbot", "dataforseobot",
-	"blexbot", "barkrowler", "serpstatbot", "screaming frog",
-}
-
-// isSearchCrawlerUA reports whether the User-Agent identifies a search/AI
-// crawler or link-preview fetcher.
-func isSearchCrawlerUA(ua string) bool {
-	ua = strings.ToLower(ua)
-	for _, s := range crawlerUAs {
-		if strings.Contains(ua, s) {
-			return true
-		}
-	}
-	return false
-}
-
 // mediaExts are file extensions that a bucket of images/attachments would have
 // served. Requests for these get an empty 410 rather than a page body.
 var mediaExts = map[string]bool{
@@ -432,7 +366,7 @@ func renderPage(domain string) []byte {
 // the other branches' already-minimal bodies would net negative.
 func writeHTML(w http.ResponseWriter, r *http.Request, status int, body []byte) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Vary", "Accept, User-Agent, Accept-Encoding")
+	w.Header().Set("Vary", "Accept, Accept-Encoding")
 	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		w.WriteHeader(status)
 		w.Write(body)
@@ -511,20 +445,19 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGone answers every non-health request with HTTP 410 Gone (except
-// /robots.txt). The response is chosen from the request path, headers, and
-// User-Agent so federating servers and API clients get compact machine-readable
-// bodies while human browsers get the HTML page.
+// /robots.txt). The response is chosen from the request path and headers so
+// federating servers and API clients get compact machine-readable bodies
+// while human browsers get the HTML page.
 func handleGone(w http.ResponseWriter, r *http.Request) {
 	// The resource is permanently gone, so let the client hold on to the
 	// 410 and stop re-requesting. "private" (rather than "public") is
-	// deliberate: the body varies by Accept/User-Agent/path, and shared
-	// caches like Cloudflare don't key on Vary by default, so a public
-	// directive lets one client's response (e.g. a bot's empty body) get
-	// served to every other visitor. private confines caching to the
-	// requesting client, which does respect Vary. Applies to every branch
-	// below.
+	// deliberate: the body varies by Accept/path, and shared caches like
+	// Cloudflare don't key on Vary by default, so a public directive lets
+	// one client's response (e.g. a bot's empty body) get served to every
+	// other visitor. private confines caching to the requesting client,
+	// which does respect Vary. Applies to every branch below.
 	w.Header().Set("Cache-Control", "private, max-age=86400")
-	w.Header().Set("Vary", "Accept, User-Agent")
+	w.Header().Set("Vary", "Accept")
 
 	switch {
 	case r.URL.Path == "/robots.txt":
@@ -590,18 +523,6 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/tags/"):
 		// Hashtag pages are crawler traffic, not human visits, so drop them
 		// with an empty 410 instead of the ~150 KB page.
-		w.WriteHeader(http.StatusGone)
-	case isFediverseServerUA(r.UserAgent()):
-		// A known fediverse server that didn't send an explicit AP Accept
-		// (e.g. link-preview or generic fetch). Give it a Tombstone rather
-		// than the HTML page.
-		body := fmt.Sprintf(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":%q}`+"\n", requestURL(r))
-		w.Header().Set("Content-Type", "application/activity+json; charset=utf-8")
-		w.WriteHeader(http.StatusGone)
-		w.Write([]byte(body))
-	case isSearchCrawlerUA(r.UserAgent()):
-		// Search / AI crawlers and link-preview fetchers: skip the ~150 KB
-		// page; the 410 alone tells them to deindex the URL.
 		w.WriteHeader(http.StatusGone)
 	default:
 		writeHTML(w, r, http.StatusGone, renderPage(domainFromRequest(r)))
