@@ -12,3 +12,50 @@ LOG_REQUESTS = "true"
 type = "Text"
 globs = ["**/*.svg"]
 fallthrough = true
+
+# Each hostname's zone must already be an active zone in this Cloudflare
+# account (orange-clouded DNS) for these to take effect. custom_domain = true
+# lets Wrangler create/manage the DNS record and certificate for each hostname.
+[[routes]]
+pattern = "vmcrawl.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.vmcrawl.com"
+custom_domain = true
+
+[[routes]]
+pattern = "mastoreqs.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.mastoreqs.com"
+custom_domain = true
+
+[[routes]]
+pattern = "vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "www.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "matrix.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "docs.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "status.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "cdn.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "dna.vmst.io"
+custom_domain = true
