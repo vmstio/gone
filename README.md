@@ -40,49 +40,49 @@ traffic comes from other servers rather than browsers. The response is chosen
 from the request path and headers, checked in this order. Every response is
 `410 Gone` **except** `/robots.txt`, which is a live `200` directive:
 
-1. **`/robots.txt`** → `200 text/plain` — `User-agent: *` / `Disallow: /`, to
-   steer crawlers away.
-2. **Dotfile probe** — a path segment starting with `.` (e.g. `/.env`,
-   `/.git/HEAD`; `/.well-known/…` is excluded from this rule) → empty body —
-   vulnerability scanner noise.
-3. **Media request** (see [Media](#media-former-s3-bucket-requests) below) →
-   empty body — the client discards it anyway.
-4. **`/.well-known/host-meta[.json]`** → empty body, `application/xrd+xml`
-   (or `application/json` for the `.json` variant) — WebFinger discovery
-   document.
-5. **Matrix** — `/_matrix/…` or `/.well-known/matrix/…` → Matrix error
-   `{"errcode":"M_UNKNOWN","error":"…"}`. Matched by path, since Matrix
-   clients often send no `Accept` header.
-6. **ActivityPub inbox** — path ending `/inbox` (shared `/inbox` or
-   `/users/x/inbox`) → empty body, `application/activity+json`. Federation
-   delivery POSTs only need the 410 status to stop delivering, so the
-   Tombstone body is skipped.
-7. **ActivityPub** — `Accept` **or** `Content-Type` is
-   `application/activity+json` / `application/ld+json` → ActivityStreams
-   [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone)
-   whose `id` is the requested URL, for actor/status fetches.
-   `Content-Type` matching also covers AP POSTs that aren't to an inbox.
-8. **JSON API and discovery** → `{"error":"Gone"}`. Matched **by path**,
-   since these clients (apps, scrapers, OAuth libraries) often send a
-   browser-style `Accept` or none at all:
-   - `/api/…` — the Mastodon REST API, and the highest-volume traffic this
-     server sees, so a 17-byte JSON body instead of the ~15 KB page is the
-     single biggest bandwidth saving
-   - `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/…` —
-     fediverse discovery
-   - `/.well-known/oauth-authorization-server`,
-     `/.well-known/openid-configuration` — OAuth/OIDC server metadata
-   - `/oauth/token`, `/oauth/revoke`, `/oauth/userinfo` — OAuth/OIDC machine
-     endpoints (`/oauth/authorize` is deliberately excluded, since it's the
-     interactive browser login page and still gets the HTML page)
-   - any `*.json` path, or `Accept: application/json` / `application/jrd+json`
-9. **Feed** — path ending `.rss` / `.atom` → empty body,
-   `application/rss+xml` / `application/atom+xml` — dead feed, so readers
-   stop polling.
-10. **`/tags/…`** → empty body — hashtag pages are crawler traffic, not
-    human visits.
-11. **anything else** (real browsers, and any other bot/crawler not caught
-    above) → the HTML page.
+```mermaid
+flowchart TD
+    A["Request"] --> B{"/robots.txt ?"}
+    B -- yes --> B1["200 text/plain\nUser-agent: * / Disallow: /"]
+    B -- no --> C{"Dotfile probe?\n(path segment starts with .\nexcl. /.well-known/…)"}
+    C -- yes --> C1["410, empty body"]
+    C -- no --> D{"Media request?\n(see Media section)"}
+    D -- yes --> D1["410, empty body"]
+    D -- no --> E{"/.well-known/host-meta[.json] ?"}
+    E -- yes --> E1["410, empty body\napplication/xrd+xml or json"]
+    E -- no --> F{"Matrix?\n/_matrix/… or\n/.well-known/matrix/…"}
+    F -- yes --> F1["410 Matrix error JSON\n{errcode: M_UNKNOWN}"]
+    F -- no --> G{"ActivityPub inbox?\npath ends /inbox"}
+    G -- yes --> G1["410, empty body\napplication/activity+json"]
+    G -- no --> H{"ActivityPub?\nAccept or Content-Type is\nactivity+json / ld+json"}
+    H -- yes --> H1["410 ActivityStreams Tombstone"]
+    H -- no --> I{"JSON API / discovery path?\n/api/…, webfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: json"}
+    I -- yes --> I1["410 {\"error\":\"Gone\"}"]
+    I -- no --> J{"Feed?\npath ends .rss / .atom"}
+    J -- yes --> J1["410, empty body\nrss+xml / atom+xml"]
+    J -- no --> K{"/tags/… ?"}
+    K -- yes --> K1["410, empty body"]
+    K -- no --> L["410, HTML page"]
+```
+
+Every branch returns `410 Gone` except `/robots.txt`, which is a live `200`. A few
+notes that don't fit in the diagram:
+
+- **Media** requests are covered in [Media](#media-former-s3-bucket-requests)
+  below.
+- **ActivityPub inbox** gets an empty body (not the Tombstone) because
+  federation delivery POSTs only need the 410 status to stop delivering.
+- **ActivityPub** `Content-Type` matching also covers AP POSTs that aren't to
+  an inbox; the `Tombstone`'s `id` is the requested URL.
+- **JSON API and discovery** is matched **by path**, since these clients
+  (apps, scrapers, OAuth libraries) often send a browser-style `Accept` or
+  none at all. `/api/…` is the Mastodon REST API and the highest-volume
+  traffic this server sees, so a 17-byte JSON body instead of the ~15 KB page
+  is the single biggest bandwidth saving. `/oauth/authorize` is deliberately
+  excluded from the OAuth endpoints, since it's the interactive browser login
+  page and still gets the HTML page.
+- **Feed** and **`/tags/…`** matches are dead ends for readers/crawlers that
+  would otherwise keep polling or scraping.
 
 All 410 responses carry `Cache-Control: private, max-age=86400` so the
 requesting client holds on to the 410 and stops re-requesting a permanently
