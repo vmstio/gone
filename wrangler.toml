@@ -1,0 +1,14 @@
+name = "gone"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+# Health checks aren't logged. Set to "false" to disable all request logging.
+[vars]
+LOG_REQUESTS = "true"
+
+# Bundle logo.svg as a raw text string rather than a binary asset, so it can
+# be base64-encoded into the page template at module load time.
+[[rules]]
+type = "Text"
+globs = ["**/*.svg"]
+fallthrough = true

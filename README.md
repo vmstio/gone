@@ -157,3 +157,29 @@ doctl apps create --spec .do/app.yaml
 ```
 
 Update the `github.repo` field in `.do/app.yaml` to match your repository.
+
+## Deploy to Cloudflare Workers
+
+`worker.js` is a port of the same content-negotiation logic to a Cloudflare
+Worker, for deployments that want to run at Cloudflare's edge instead of on a
+VM/PaaS. It has no dependencies beyond the `wrangler` CLI.
+
+```sh
+npx wrangler deploy
+```
+
+Notes on the port:
+
+- Gzip is handled automatically by Cloudflare's edge for `text/html`
+  responses, so (unlike `main.go`) the Worker doesn't compress the page
+  itself.
+- `logo.svg` is bundled as a text module (see the `[[rules]]` in
+  `wrangler.toml`) and base64-encoded into the page template once per
+  isolate, mirroring `main.go`'s `init()`.
+- Client IP logging prefers `CF-Connecting-IP` (set by Cloudflare's edge and
+  not spoofable by the client) over `X-Forwarded-For`.
+- Request logging goes to `console.log`, visible via `wrangler tail` or
+  Logpush. Set the `LOG_REQUESTS` var to `"false"` in `wrangler.toml` to
+  disable it.
+- `main.go` and `worker.js` are independent deployment targets — pick one
+  per deployment, they're not meant to run together.
