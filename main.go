@@ -16,12 +16,14 @@ import (
 	"strings"
 )
 
-// oopsPNG is the static illustration, disintegrated into flying tiles with a
+// logoSVG is the Mastodon logo, disintegrated into flying tiles with a
 // "Thanos snap" effect on hover/click (mirroring the Mastodon error page,
-// but with a bit more flair).
+// but with a bit more flair). It's vector art, rasterized onto the canvas
+// at a higher resolution than its intrinsic size for crisp display — see
+// RENDER_SCALE in the page script.
 //
-//go:embed oops.png
-var oopsPNG []byte
+//go:embed logo.svg
+var logoSVG []byte
 
 // pageTpl is the self-contained HTML with the illustrations inlined as data
 // URIs. The __DOMAIN__ placeholder is filled per request with the requested
@@ -63,11 +65,10 @@ body {
 .dialog { margin: 20px; }
 .dialog__illustration canvas {
   width: 100%;
-  max-width: 470px;
+  max-width: 140px;
   height: auto;
-  margin-top: -120px;
-  margin-bottom: -45px;
   display: block;
+  margin: 0 auto 24px;
   cursor: pointer;
 }
 .dialog h1 {
@@ -91,9 +92,13 @@ body {
   var canvas = document.getElementById('illustration');
   var ctx = canvas.getContext('2d');
   var img = new Image();
-  img.src = 'data:image/png;base64,__PNG_DATA__';
+  img.src = 'data:image/svg+xml;base64,__LOGO_DATA__';
 
-  var tileSize = 10;
+  // The logo is vector art rasterized at RENDER_SCALE times its intrinsic
+  // size, so it stays crisp at the canvas's actual pixel resolution rather
+  // than the small source dimensions in the SVG's width/height attributes.
+  var RENDER_SCALE = 6;
+  var tileSize = 8;
   var tiles = [];
   var progress = 0; // 0 = intact, 1 = fully dissolved
   var target = 0;
@@ -130,14 +135,14 @@ body {
       p = Math.min(Math.max(p, 0), 1);
       if (p >= 1) continue;
       if (p <= 0) {
-        ctx.drawImage(img, t.x, t.y, t.w, t.h, t.x, t.y, t.w, t.h);
+        ctx.drawImage(img, t.x / RENDER_SCALE, t.y / RENDER_SCALE, t.w / RENDER_SCALE, t.h / RENDER_SCALE, t.x, t.y, t.w, t.h);
         continue;
       }
       ctx.save();
       ctx.globalAlpha = 1 - p;
       ctx.translate(t.x + t.w / 2 + t.dx * p, t.y + t.h / 2 + t.dy * p);
       ctx.rotate(t.rot * p);
-      ctx.drawImage(img, t.x, t.y, t.w, t.h, -t.w / 2, -t.h / 2, t.w, t.h);
+      ctx.drawImage(img, t.x / RENDER_SCALE, t.y / RENDER_SCALE, t.w / RENDER_SCALE, t.h / RENDER_SCALE, -t.w / 2, -t.h / 2, t.w, t.h);
       ctx.restore();
     }
   }
@@ -170,8 +175,8 @@ body {
   }
 
   img.onload = function () {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+    canvas.width = img.naturalWidth * RENDER_SCALE;
+    canvas.height = img.naturalHeight * RENDER_SCALE;
     buildTiles();
     drawFrame();
   };
@@ -186,7 +191,7 @@ body {
 `
 
 func init() {
-	pageTpl = strings.Replace(pageTemplate, "__PNG_DATA__", base64.StdEncoding.EncodeToString(oopsPNG), 1)
+	pageTpl = strings.Replace(pageTemplate, "__LOGO_DATA__", base64.StdEncoding.EncodeToString(logoSVG), 1)
 }
 
 // rawHost returns the requested host, preferring the X-Forwarded-Host header
@@ -374,10 +379,10 @@ func renderPage(domain string) []byte {
 }
 
 // writeHTML sends the rendered page, gzip-compressing it when the client
-// advertises support. The HTML page (~20 KB, mostly the embedded PNG) dwarfs
-// every other response this server sends (a few bytes to a few hundred), so
-// it's the only branch worth paying the compression overhead for — gzipping
-// the other branches' already-minimal bodies would net negative.
+// advertises support. The HTML page dwarfs every other response this server
+// sends (a few bytes to a few hundred), so it's the only branch worth paying
+// the compression overhead for — gzipping the other branches' already-minimal
+// bodies would net negative.
 func writeHTML(w http.ResponseWriter, r *http.Request, status int, body []byte) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Vary", "Accept, Accept-Encoding")
