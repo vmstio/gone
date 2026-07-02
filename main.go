@@ -3,6 +3,7 @@
 package main
 
 import (
+	"compress/gzip"
 	_ "embed"
 	"encoding/base64"
 	"fmt"
@@ -424,6 +425,26 @@ func renderPage(domain string) []byte {
 	return []byte(strings.ReplaceAll(pageTpl, "__DOMAIN__", html.EscapeString(domain)))
 }
 
+// writeHTML sends the rendered page, gzip-compressing it when the client
+// advertises support. The HTML page (~20 KB, mostly the embedded PNG) dwarfs
+// every other response this server sends (a few bytes to a few hundred), so
+// it's the only branch worth paying the compression overhead for — gzipping
+// the other branches' already-minimal bodies would net negative.
+func writeHTML(w http.ResponseWriter, r *http.Request, status int, body []byte) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Vary", "Accept, User-Agent, Accept-Encoding")
+	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.WriteHeader(status)
+		w.Write(body)
+		return
+	}
+	w.Header().Set("Content-Encoding", "gzip")
+	w.WriteHeader(status)
+	gz := gzip.NewWriter(w)
+	gz.Write(body)
+	gz.Close()
+}
+
 // statusRecorder wraps http.ResponseWriter to capture the status code and the
 // number of body bytes written, for logging.
 type statusRecorder struct {
@@ -583,9 +604,7 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 		// page; the 410 alone tells them to deindex the URL.
 		w.WriteHeader(http.StatusGone)
 	default:
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusGone)
-		w.Write(renderPage(domainFromRequest(r)))
+		writeHTML(w, r, http.StatusGone, renderPage(domainFromRequest(r)))
 	}
 }
 
