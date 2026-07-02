@@ -57,7 +57,7 @@ flowchart TD
     G -- no --> H{"ActivityPub?\nAccept or Content-Type is\nactivity+json / ld+json"}
     H -- yes --> H1["410 ActivityStreams Tombstone"]
     H -- no --> I{"JSON API / discovery path?\n/api/…, webfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: json"}
-    I -- yes --> I1["410 {\"error\":\"Gone\"}"]
+    I -- yes --> I1["410 {#quot;error#quot;:#quot;Gone#quot;}"]
     I -- no --> J{"Feed?\npath ends .rss / .atom"}
     J -- yes --> J1["410, empty body\nrss+xml / atom+xml"]
     J -- no --> K{"/tags/… ?"}
