@@ -4,11 +4,15 @@ A tiny Go web server that responds to **every** request with `HTTP 410 Gone`
 and a self-contained page mirroring the Mastodon error page
 (https://vmst.io/500.htm).
 
-The illustrations are embedded into the binary and inlined into the page as
-base64 data URIs, so the app has no external dependencies and serves a single
-410 response per request. A static image shows by default and swaps to the
-animated version on hover, mirroring the Mastodon error page. Dark mode follows
-the browser's `prefers-color-scheme`.
+The illustration is embedded into the binary and inlined into the page as a
+base64 data URI, so the app has no external dependencies and serves a single
+410 response per request. It's drawn on a `<canvas>` and disintegrates into
+flying, fading tiles on hover/click — a "Thanos snap" effect — rather than
+swapping to a separate animated file. Dark mode follows the browser's
+`prefers-color-scheme`.
+
+The HTML page is ~15 KB (~10 KB gzipped), most of which is the embedded PNG.
+See [Page size](#page-size) for how it's kept small.
 
 The displayed domain is taken from the request (`X-Forwarded-Host`, falling
 back to `Host`, with any port stripped and the value HTML-escaped), so a single
@@ -44,7 +48,7 @@ from the request path and headers. Every response is `410 Gone` **except**
 | Path `/_matrix/…` or `/.well-known/matrix/…`      | Matrix error `{"errcode":"M_UNKNOWN","error":"…"}` (Matrix clients often send no `Accept`, so the path is the signal) |
 | Path ending `/inbox` (shared `/inbox` or `/users/x/inbox`)         | empty body with `application/activity+json` — federation delivery POSTs only need the 410 status to stop delivering, so the Tombstone body is skipped |
 | ActivityPub: `Accept` **or** `Content-Type` is `application/activity+json` / `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL, for actor/status fetches. `Content-Type` matching also covers AP POSTs that aren't to an inbox. |
-| Path `/api/…`, `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/…`, any `*.json`, or `Accept: application/json` / `application/jrd+json` | `{"error":"Gone"}`. The Mastodon REST API is matched **by path** because its clients (apps and scrapers alike) usually send a browser-style `Accept` — this is the highest-volume traffic, so answering with a 17-byte JSON body instead of the ~150 KB page is the single biggest bandwidth saving. |
+| Path `/api/…`, `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/…`, any `*.json`, or `Accept: application/json` / `application/jrd+json` | `{"error":"Gone"}`. The Mastodon REST API is matched **by path** because its clients (apps and scrapers alike) usually send a browser-style `Accept` — this is the highest-volume traffic, so answering with a 17-byte JSON body instead of the ~15 KB page is the single biggest bandwidth saving. |
 | Path ending `.rss` / `.atom`                      | empty body with `application/rss+xml` / `application/atom+xml` — dead feed, so readers stop polling |
 | Path `/tags/…`                                    | empty body — hashtag pages are crawler traffic, not human visits |
 | anything else (real browsers, and any other bot/crawler by request path or `Accept`) | the HTML page |
@@ -60,7 +64,7 @@ Matrix homeserver, and a media/attachment bucket at the same time.
 ### Media (former S3 bucket) requests
 
 A bucket of images/attachments is requested by `<img>`/`<video>` tags and
-server-side refetches that ignore any HTML body, so serving the ~150 KB page
+server-side refetches that ignore any HTML body, so serving the ~15 KB page
 for each would waste bandwidth. Such requests get an **empty 410** instead. A
 request counts as media when any of:
 
@@ -81,6 +85,40 @@ curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 # Content-Type: application/activity+json; charset=utf-8
 # {"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":"https://your.domain/users/alice"}
 ```
+
+## Page size
+
+The full HTML page (the default branch above, sent to real browsers) is the
+only response worth optimizing for size — every other branch is already an
+empty body or a body measured in bytes. It's currently **~15 KB raw, ~10 KB
+gzipped**, down from an initial ~150 KB with the animated GIF still embedded.
+That came from three changes, in order of impact:
+
+1. **Drop the embedded GIF.** The hover/click animation used to swap the
+   `<img>` source to a separate ~93 KB animated GIF. Replacing it with a
+   canvas-drawn "Thanos snap" tile-dissolve effect (see above) removed that
+   asset entirely — the single biggest saving.
+2. **Compress the response.** `writeHTML` gzips the page when the client
+   sends `Accept-Encoding: gzip` (~21.6 KB → ~15.2 KB at the time it was
+   added). The other branches' bodies are already only a few bytes to a few
+   hundred, where gzip's per-response overhead would net negative, so only
+   this branch compresses.
+3. **Optimize and resize the PNG illustration.** The source PNG was
+   requantized with `pngquant` and recompressed with `zopflipng` (lossless
+   recompression alone gained nothing — it was already an efficient indexed
+   PNG), then downscaled from 578×578 to 470×470 to match its CSS
+   `max-width`. Downscaling with a smooth filter (Lanczos/triangle/catrom)
+   actually made the file *larger* — anti-aliased edge pixels add colors that
+   hurt palette-based compression more than the pixel-count reduction saves —
+   so it's resized with nearest-neighbor (`point`) sampling instead, trading
+   slightly less smooth curves when zoomed in for a smaller file. Net: 17 KB
+   → 8.7 KB.
+
+WebP/AVIF conversion was evaluated and rejected: for this specific
+flat-color, small-palette illustration, lossless WebP only saved ~6% over the
+optimized PNG, and lossy WebP came out larger (dithering artifacts on flat
+color fields cost more than they saved) — not worth adding a format/tooling
+dependency for.
 
 ## Logging
 
