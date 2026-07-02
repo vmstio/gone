@@ -36,22 +36,52 @@ curl -i http://localhost:8080/
 
 Since this is meant to stand in for a decommissioned federated server, most
 traffic comes from other servers rather than browsers. The response is chosen
-from the request path and headers. Every response is `410 Gone` **except**
-`robots.txt`, which is a live `200` directive:
+from the request path and headers, checked in this order. Every response is
+`410 Gone` **except** `/robots.txt`, which is a live `200` directive:
 
-| Match (in order)                                  | Response |
-|---------------------------------------------------|----------|
-| Path `/robots.txt`                                | `200` `text/plain` — `User-agent: *` / `Disallow: /`, to steer crawlers away |
-| Dotfile probe (a path segment starting with `.`, e.g. `/.env`, `/.git/HEAD`; `/.well-known/…` excluded) | empty body — vulnerability scanner noise |
-| Media request (see below)                         | empty body — the client discards it anyway |
-| Path `/.well-known/host-meta[.json]`              | empty body with `application/xrd+xml` (or `application/json` for the `.json` variant) — WebFinger discovery document |
-| Path `/_matrix/…` or `/.well-known/matrix/…`      | Matrix error `{"errcode":"M_UNKNOWN","error":"…"}` (Matrix clients often send no `Accept`, so the path is the signal) |
-| Path ending `/inbox` (shared `/inbox` or `/users/x/inbox`)         | empty body with `application/activity+json` — federation delivery POSTs only need the 410 status to stop delivering, so the Tombstone body is skipped |
-| ActivityPub: `Accept` **or** `Content-Type` is `application/activity+json` / `application/ld+json` | ActivityStreams [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone) whose `id` is the requested URL, for actor/status fetches. `Content-Type` matching also covers AP POSTs that aren't to an inbox. |
-| Path `/api/…`, `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/…`, `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration`, `/oauth/token`, `/oauth/revoke`, `/oauth/userinfo`, any `*.json`, or `Accept: application/json` / `application/jrd+json` | `{"error":"Gone"}`. These are matched **by path** because their clients (apps, scrapers, and OAuth libraries alike) often send a browser-style `Accept` or none at all — the REST API is the highest-volume traffic, so answering with a 17-byte JSON body instead of the ~15 KB page is the single biggest bandwidth saving. `/oauth/authorize` is deliberately excluded — it's the interactive browser login page, so it still gets the HTML page. |
-| Path ending `.rss` / `.atom`                      | empty body with `application/rss+xml` / `application/atom+xml` — dead feed, so readers stop polling |
-| Path `/tags/…`                                    | empty body — hashtag pages are crawler traffic, not human visits |
-| anything else (real browsers, and any other bot/crawler by request path or `Accept`) | the HTML page |
+1. **`/robots.txt`** → `200 text/plain` — `User-agent: *` / `Disallow: /`, to
+   steer crawlers away.
+2. **Dotfile probe** — a path segment starting with `.` (e.g. `/.env`,
+   `/.git/HEAD`; `/.well-known/…` is excluded from this rule) → empty body —
+   vulnerability scanner noise.
+3. **Media request** (see [Media](#media-former-s3-bucket-requests) below) →
+   empty body — the client discards it anyway.
+4. **`/.well-known/host-meta[.json]`** → empty body, `application/xrd+xml`
+   (or `application/json` for the `.json` variant) — WebFinger discovery
+   document.
+5. **Matrix** — `/_matrix/…` or `/.well-known/matrix/…` → Matrix error
+   `{"errcode":"M_UNKNOWN","error":"…"}`. Matched by path, since Matrix
+   clients often send no `Accept` header.
+6. **ActivityPub inbox** — path ending `/inbox` (shared `/inbox` or
+   `/users/x/inbox`) → empty body, `application/activity+json`. Federation
+   delivery POSTs only need the 410 status to stop delivering, so the
+   Tombstone body is skipped.
+7. **ActivityPub** — `Accept` **or** `Content-Type` is
+   `application/activity+json` / `application/ld+json` → ActivityStreams
+   [`Tombstone`](https://www.w3.org/TR/activitystreams-vocabulary/#dfn-tombstone)
+   whose `id` is the requested URL, for actor/status fetches.
+   `Content-Type` matching also covers AP POSTs that aren't to an inbox.
+8. **JSON API and discovery** → `{"error":"Gone"}`. Matched **by path**,
+   since these clients (apps, scrapers, OAuth libraries) often send a
+   browser-style `Accept` or none at all:
+   - `/api/…` — the Mastodon REST API, and the highest-volume traffic this
+     server sees, so a 17-byte JSON body instead of the ~15 KB page is the
+     single biggest bandwidth saving
+   - `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/…` —
+     fediverse discovery
+   - `/.well-known/oauth-authorization-server`,
+     `/.well-known/openid-configuration` — OAuth/OIDC server metadata
+   - `/oauth/token`, `/oauth/revoke`, `/oauth/userinfo` — OAuth/OIDC machine
+     endpoints (`/oauth/authorize` is deliberately excluded, since it's the
+     interactive browser login page and still gets the HTML page)
+   - any `*.json` path, or `Accept: application/json` / `application/jrd+json`
+9. **Feed** — path ending `.rss` / `.atom` → empty body,
+   `application/rss+xml` / `application/atom+xml` — dead feed, so readers
+   stop polling.
+10. **`/tags/…`** → empty body — hashtag pages are crawler traffic, not
+    human visits.
+11. **anything else** (real browsers, and any other bot/crawler not caught
+    above) → the HTML page.
 
 All 410 responses carry `Cache-Control: private, max-age=86400` so the
 requesting client holds on to the 410 and stops re-requesting a permanently
