@@ -103,9 +103,9 @@ body {
   var RENDER_SCALE = 6;
   var tileSize = 8;
   var tiles = [];
-  var progress = 0; // 0 = intact, 1 = fully dissolved
+  var progress = 0; // 0 = intact, 1 = fully dissolved; only ever increases
   var target = 0;
-  var speed = 1 / 700; // progress units per ms
+  var speed = 1 / 6000; // progress units per ms — a slow, wind-borne drift
   var lastTs = null;
   var running = false;
 
@@ -121,9 +121,15 @@ body {
           w: Math.min(tileSize, canvas.width - x * tileSize),
           h: Math.min(tileSize, canvas.height - y * tileSize),
           delay: (x / cols) * 0.5 + Math.random() * 0.3,
-          dx: (Math.random() - 0.2) * (window.innerWidth * 0.6),
-          dy: -Math.random() * (window.innerHeight * 0.7) - 40,
-          rot: (Math.random() - 0.5) * 1.4
+          // A shared rightward breeze (with per-tile jitter) rather than an
+          // outward blast, plus a gentle rise and a perpendicular sway so
+          // tiles flutter like leaves caught in the wind.
+          windX: window.innerWidth * (0.45 + Math.random() * 0.5),
+          windY: -window.innerHeight * (0.1 + Math.random() * 0.25),
+          sway: 15 + Math.random() * 25,
+          swayFreq: 1.2 + Math.random() * 1.8,
+          swayPhase: Math.random() * Math.PI * 2,
+          rot: (Math.random() - 0.5) * 2.2
         });
       }
     }
@@ -137,6 +143,17 @@ body {
   function drawFrame() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     octx.clearRect(0, 0, overlay.width, overlay.height);
+
+    // A faint grayscale ghost of the original logo, left behind under
+    // whatever hasn't dissolved away yet.
+    if (progress > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      ctx.filter = 'grayscale(100%)';
+      ctx.drawImage(img, 0, 0, canvas.width / RENDER_SCALE, canvas.height / RENDER_SCALE, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
+
     var rect = canvas.getBoundingClientRect();
     var displayScale = rect.width / canvas.width;
     var originX = rect.left, originY = rect.top;
@@ -150,13 +167,14 @@ body {
         ctx.drawImage(img, t.x / RENDER_SCALE, t.y / RENDER_SCALE, t.w / RENDER_SCALE, t.h / RENDER_SCALE, t.x, t.y, t.w, t.h);
         continue;
       }
+      var sway = Math.sin(p * t.swayFreq * Math.PI + t.swayPhase) * t.sway * p;
       octx.save();
       octx.globalAlpha = 1 - p;
       octx.translate(
-        originX + (t.x + t.w / 2) * displayScale + t.dx * p,
-        originY + (t.y + t.h / 2) * displayScale + t.dy * p
+        originX + (t.x + t.w / 2) * displayScale + t.windX * p + sway,
+        originY + (t.y + t.h / 2) * displayScale + t.windY * p
       );
-      octx.rotate(t.rot * p);
+      octx.rotate(t.rot * p + Math.sin(p * t.swayFreq * Math.PI + t.swayPhase) * 0.25);
       var dw = t.w * displayScale, dh = t.h * displayScale;
       octx.drawImage(img, t.x / RENDER_SCALE, t.y / RENDER_SCALE, t.w / RENDER_SCALE, t.h / RENDER_SCALE, -dw / 2, -dh / 2, dw, dh);
       octx.restore();
@@ -169,8 +187,6 @@ body {
     lastTs = ts;
     if (progress < target) {
       progress = Math.min(target, progress + dt * speed);
-    } else if (progress > target) {
-      progress = Math.max(target, progress - dt * speed);
     }
     drawFrame();
     if (progress !== target) {
@@ -205,8 +221,7 @@ body {
   });
 
   canvas.addEventListener('mouseenter', function () { setTarget(1); });
-  canvas.addEventListener('mouseleave', function () { setTarget(0); });
-  canvas.addEventListener('click', function () { setTarget(target > 0.5 ? 0 : 1); });
+  canvas.addEventListener('click', function () { setTarget(1); });
 })();
 </script>
 </body>
