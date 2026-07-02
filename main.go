@@ -15,14 +15,12 @@ import (
 	"strings"
 )
 
-// oopsPNG is the static illustration shown by default; oopsGIF is the
-// animated version swapped in on hover (mirroring the Mastodon error page).
+// oopsPNG is the static illustration, disintegrated into flying tiles with a
+// "Thanos snap" effect on hover/click (mirroring the Mastodon error page,
+// but with a bit more flair).
 //
 //go:embed oops.png
 var oopsPNG []byte
-
-//go:embed oops.gif
-var oopsGIF []byte
 
 // pageTpl is the self-contained HTML with the illustrations inlined as data
 // URIs. The __DOMAIN__ placeholder is filled per request with the requested
@@ -62,13 +60,14 @@ body {
   align-items: center;
 }
 .dialog { margin: 20px; }
-.dialog__illustration img {
+.dialog__illustration canvas {
   width: 100%;
   max-width: 470px;
   height: auto;
   margin-top: -120px;
   margin-bottom: -45px;
   display: block;
+  cursor: pointer;
 }
 .dialog h1 {
   font-size: 20px;
@@ -80,7 +79,7 @@ body {
 <body>
 <div class="dialog">
 <div class="dialog__illustration">
-<img id="illustration" alt="Mastodon" draggable="false" src="data:image/png;base64,__PNG_DATA__">
+<canvas id="illustration" role="img" aria-label="Mastodon"></canvas>
 </div>
 <div class="dialog__message">
 <h1>__DOMAIN__ is HTTP 410 (Gone)</h1>
@@ -88,11 +87,97 @@ body {
 </div>
 <script>
 (function () {
-  var img = document.getElementById('illustration');
-  var still = img.src;
-  var animated = 'data:image/gif;base64,__GIF_DATA__';
-  img.addEventListener('mouseenter', function () { img.src = animated; });
-  img.addEventListener('mouseleave', function () { img.src = still; });
+  var canvas = document.getElementById('illustration');
+  var ctx = canvas.getContext('2d');
+  var img = new Image();
+  img.src = 'data:image/png;base64,__PNG_DATA__';
+
+  var tileSize = 10;
+  var tiles = [];
+  var progress = 0; // 0 = intact, 1 = fully dissolved
+  var target = 0;
+  var speed = 1 / 700; // progress units per ms
+  var lastTs = null;
+  var running = false;
+
+  function buildTiles() {
+    var cols = Math.ceil(canvas.width / tileSize);
+    var rows = Math.ceil(canvas.height / tileSize);
+    tiles = [];
+    for (var y = 0; y < rows; y++) {
+      for (var x = 0; x < cols; x++) {
+        tiles.push({
+          x: x * tileSize,
+          y: y * tileSize,
+          w: Math.min(tileSize, canvas.width - x * tileSize),
+          h: Math.min(tileSize, canvas.height - y * tileSize),
+          delay: (x / cols) * 0.5 + Math.random() * 0.3,
+          dx: (Math.random() - 0.2) * 90,
+          dy: -Math.random() * 110 - 20,
+          rot: (Math.random() - 0.5) * 1.4
+        });
+      }
+    }
+  }
+
+  function drawFrame() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var i = 0; i < tiles.length; i++) {
+      var t = tiles[i];
+      var span = 1 - t.delay;
+      var p = span > 0 ? (progress - t.delay) / span : progress > t.delay ? 1 : 0;
+      p = Math.min(Math.max(p, 0), 1);
+      if (p >= 1) continue;
+      if (p <= 0) {
+        ctx.drawImage(img, t.x, t.y, t.w, t.h, t.x, t.y, t.w, t.h);
+        continue;
+      }
+      ctx.save();
+      ctx.globalAlpha = 1 - p;
+      ctx.translate(t.x + t.w / 2 + t.dx * p, t.y + t.h / 2 + t.dy * p);
+      ctx.rotate(t.rot * p);
+      ctx.drawImage(img, t.x, t.y, t.w, t.h, -t.w / 2, -t.h / 2, t.w, t.h);
+      ctx.restore();
+    }
+  }
+
+  function loop(ts) {
+    if (lastTs === null) lastTs = ts;
+    var dt = ts - lastTs;
+    lastTs = ts;
+    if (progress < target) {
+      progress = Math.min(target, progress + dt * speed);
+    } else if (progress > target) {
+      progress = Math.max(target, progress - dt * speed);
+    }
+    drawFrame();
+    if (progress !== target) {
+      requestAnimationFrame(loop);
+    } else {
+      running = false;
+      lastTs = null;
+    }
+  }
+
+  function setTarget(t) {
+    target = t;
+    if (!running) {
+      running = true;
+      lastTs = null;
+      requestAnimationFrame(loop);
+    }
+  }
+
+  img.onload = function () {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    buildTiles();
+    drawFrame();
+  };
+
+  canvas.addEventListener('mouseenter', function () { setTarget(1); });
+  canvas.addEventListener('mouseleave', function () { setTarget(0); });
+  canvas.addEventListener('click', function () { setTarget(target > 0.5 ? 0 : 1); });
 })();
 </script>
 </body>
@@ -101,7 +186,6 @@ body {
 
 func init() {
 	pageTpl = strings.Replace(pageTemplate, "__PNG_DATA__", base64.StdEncoding.EncodeToString(oopsPNG), 1)
-	pageTpl = strings.Replace(pageTpl, "__GIF_DATA__", base64.StdEncoding.EncodeToString(oopsGIF), 1)
 }
 
 // rawHost returns the requested host, preferring the X-Forwarded-Host header
