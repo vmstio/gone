@@ -263,19 +263,33 @@ func isNodeInfoPath(p string) bool {
 }
 
 // isJSONDiscoveryPath reports whether the request targets a fediverse JSON
-// discovery endpoint (WebFinger or NodeInfo) that should answer with JSON
-// regardless of the Accept header.
+// discovery endpoint (WebFinger, NodeInfo, or OAuth/OIDC server metadata)
+// that should answer with JSON regardless of the Accept header.
 func isJSONDiscoveryPath(p string) bool {
-	return p == "/.well-known/webfinger" || isNodeInfoPath(p)
+	return p == "/.well-known/webfinger" ||
+		p == "/.well-known/oauth-authorization-server" ||
+		p == "/.well-known/openid-configuration" ||
+		isNodeInfoPath(p)
+}
+
+// isOAuthJSONPath reports whether the request targets an OAuth/OIDC endpoint
+// whose clients are machine callers expecting JSON — token exchange,
+// revocation, and OIDC userinfo — as opposed to /oauth/authorize, which is
+// the interactive browser login page and should still get the HTML page.
+// OAuth client libraries often POST to these without an explicit Accept
+// header, so the path is the reliable signal.
+func isOAuthJSONPath(p string) bool {
+	return p == "/oauth/token" || p == "/oauth/revoke" || p == "/oauth/userinfo"
 }
 
 // isJSONPath reports whether the request should get a JSON error regardless of
 // the Accept header: the Mastodon REST API (whose clients — apps and scrapers —
-// often send a browser-style Accept), fediverse JSON discovery, and any .json
-// resource.
+// often send a browser-style Accept), fediverse JSON discovery, OAuth/OIDC
+// machine endpoints, and any .json resource.
 func isJSONPath(p string) bool {
 	return strings.HasPrefix(p, "/api/") ||
 		isJSONDiscoveryPath(p) ||
+		isOAuthJSONPath(p) ||
 		strings.HasSuffix(p, ".json")
 }
 
