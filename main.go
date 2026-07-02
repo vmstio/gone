@@ -247,11 +247,16 @@ func rawHost(r *http.Request) string {
 	return strings.TrimSpace(host)
 }
 
-// domainFromRequest returns the requested host without any port, for display.
+// domainFromRequest returns the requested host without any port or leading
+// "www.", for display. Visitors landing on the www subdomain should still see
+// the bare domain, since both point at the same decommissioned service.
 func domainFromRequest(r *http.Request) string {
 	host := rawHost(r)
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
+	}
+	if len(host) >= 4 && strings.EqualFold(host[:4], "www.") {
+		host = host[4:]
 	}
 	if host == "" {
 		return defaultDomain

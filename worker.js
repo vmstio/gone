@@ -253,9 +253,12 @@ function rawHost(request) {
   return host.trim();
 }
 
-// domainFromRequest returns the requested host without any port, for display.
+// domainFromRequest returns the requested host without any port or leading
+// "www.", for display. Visitors landing on the www subdomain should still
+// see the bare domain, since both point at the same decommissioned service.
 function domainFromRequest(request) {
-  const host = splitHostPort(rawHost(request));
+  let host = splitHostPort(rawHost(request));
+  if (host.toLowerCase().startsWith("www.")) host = host.slice(4);
   return host === "" ? defaultDomain : host;
 }
 
