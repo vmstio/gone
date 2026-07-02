@@ -2,6 +2,15 @@ name = "gone"
 main = "worker.js"
 compatibility_date = "2026-07-01"
 
+# Workers Logs (persisted/queryable in the dashboard) plus basic per-
+# invocation logs, in addition to this Worker's own console.log lines.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 # Health checks aren't logged. Set to "false" to disable all request logging.
 [vars]
 LOG_REQUESTS = "true"
