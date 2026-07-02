@@ -1,8 +1,10 @@
 # gone
 
-A tiny Go web server that responds to **every** request with `HTTP 410 Gone`
-and a self-contained page mirroring the Mastodon error page
-(https://vmst.io/500.htm).
+A tiny Go web server that responds to requests with `HTTP 410 Gone` in an
+appropriate format including a self-contained Mastodon error page for visitors.
+
+This lets one deployment gracefully retire a Mastodon/ActivityPub instance, a
+Matrix homeserver, and a media/attachment bucket at the same time.
 
 The Mastodon logo is embedded into the binary as SVG and inlined into the
 page as a base64 data URI, so the app has no external dependencies and
@@ -11,8 +13,7 @@ at a higher resolution than its intrinsic size (for crisp display) and
 disintegrates into flying, fading tiles on hover/click — a "Thanos snap"
 effect. Dark mode follows the browser's `prefers-color-scheme`.
 
-The HTML page is ~7.5 KB (~3.6 KB gzipped). See [Page size](#page-size) for
-how it's kept small.
+The HTML page is ~7.5 KB (~3.6 KB gzipped).
 
 The displayed domain is taken from the request (`X-Forwarded-Host`, falling
 back to `Host`, with any port stripped and the value HTML-escaped), so a single
@@ -88,9 +89,6 @@ requesting client holds on to the 410 and stops re-requesting a permanently
 gone resource, without a shared cache serving one client's response (e.g. a
 bot's empty body) to every other visitor.
 
-This lets one deployment gracefully retire a Mastodon/ActivityPub instance, a
-Matrix homeserver, and a media/attachment bucket at the same time.
-
 ### Media (former S3 bucket) requests
 
 A bucket of images/attachments is requested by `<img>`/`<video>` tags and
@@ -115,41 +113,6 @@ curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 # Content-Type: application/activity+json; charset=utf-8
 # {"@context":"https://www.w3.org/ns/activitystreams","type":"Tombstone","id":"https://your.domain/users/alice"}
 ```
-
-## Page size
-
-The full HTML page (the default branch above, sent to real browsers) is the
-only response worth optimizing for size — every other branch is already an
-empty body or a body measured in bytes. It's currently **~7.5 KB raw, ~3.6 KB
-gzipped**, down from an initial ~150 KB when the illustration was a raster
-PNG with a separate animated GIF for the hover state. That came from a few
-changes, in order of impact:
-
-1. **Drop the embedded GIF.** The hover/click animation used to swap the
-   `<img>` source to a separate ~93 KB animated GIF. Replacing it with a
-   canvas-drawn "Thanos snap" tile-dissolve effect (see above) removed that
-   asset entirely.
-2. **Switch the illustration from PNG to inline SVG.** The Mastodon logo is
-   ~2.5 KB of vector source (~3.3 KB as base64) versus an optimized PNG that
-   still needed several kilobytes after quantization and resizing — vector
-   art wins outright for flat-color marks like this, with no
-   resolution/quality tradeoff, since the canvas rasterizes it at whatever
-   resolution it's drawn at (see `RENDER_SCALE` in the page script).
-3. **Compress the response.** `writeHTML` gzips the page when the client
-   sends `Accept-Encoding: gzip`. The other branches' bodies are already only
-   a few bytes to a few hundred, where gzip's per-response overhead would net
-   negative, so only this branch compresses.
-
-Before switching to SVG, the PNG illustration itself was optimized:
-requantized with `pngquant` and recompressed with `zopflipng`, then
-downscaled to match its CSS display size using nearest-neighbor resampling
-(smooth filters like Lanczos paradoxically made the file *larger*, since
-anti-aliased edge pixels add colors that hurt palette-based compression more
-than the pixel-count reduction saves). That workflow is moot now that the
-asset is vector, but it's the right approach for any raster art added here
-in the future. WebP/AVIF conversion was also evaluated for the PNG and
-rejected — lossless WebP only saved ~6% over the optimized PNG, and lossy
-WebP came out larger on this flat-color art.
 
 ## Logging
 
