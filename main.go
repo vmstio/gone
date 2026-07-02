@@ -315,13 +315,23 @@ func isOAuthJSONPath(p string) bool {
 	return p == "/oauth/token" || p == "/oauth/revoke" || p == "/oauth/userinfo"
 }
 
-// isJSONPath reports whether the request should get a JSON error regardless of
-// the Accept header: the Mastodon REST API (whose clients — apps and scrapers —
-// often send a browser-style Accept), fediverse JSON discovery, OAuth/OIDC
-// machine endpoints, and any .json resource.
+// isAPIPath reports whether the request targets the Mastodon REST API. Unlike
+// every other path below, its clients are human-facing apps (the official
+// web UI and third-party clients) that read the JSON error's "error" field
+// to show the user an alert, so this is the one path — besides Matrix —
+// worth spending a body on.
+func isAPIPath(p string) bool {
+	return strings.HasPrefix(p, "/api/")
+}
+
+// isJSONPath reports whether the request should get a JSON response
+// regardless of the Accept header: fediverse JSON discovery, OAuth/OIDC
+// machine endpoints, and any .json resource. These are all fetched
+// programmatically by servers or libraries that only ever check the status
+// code — real Mastodon's own WebFinger 410 is a bare `head 410`, no body —
+// so an empty body is enough.
 func isJSONPath(p string) bool {
-	return strings.HasPrefix(p, "/api/") ||
-		isJSONDiscoveryPath(p) ||
+	return isJSONDiscoveryPath(p) ||
 		isOAuthJSONPath(p) ||
 		strings.HasSuffix(p, ".json")
 }
@@ -491,18 +501,10 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "ok")
 }
 
-// jsonGoneBody is the small JSON error shared by every branch that answers
-// JSON/ActivityPub clients: WebFinger/NodeInfo/OAuth discovery, the Mastodon
-// REST API, host-meta.json, and ActivityPub inbox/actor/status requests.
-// Real Mastodon's self-destruct mode answers all of these identically, and
-// its dereferencer only branches on the 410 status (it parses the response
-// body solely on 200), so there's no reason to vary the body by client.
+// jsonGoneBody is the small JSON error for the Mastodon REST API — the one
+// path with a human on the other end. Mastodon's own web client (and
+// third-party apps) parse the "error" field to show an alert.
 const jsonGoneBody = `{"error":"Gone"}` + "\n"
-
-// xrdGoneBody is jsonGoneBody's XRD/XML equivalent, for host-meta's default
-// (non-.json) representation.
-const xrdGoneBody = `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
-	`<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0"><Property type="error">Gone</Property></XRD>` + "\n"
 
 // writeGone writes a 410 response with the given Content-Type and body.
 // An empty contentType or body is skipped, leaving no body written.
@@ -545,28 +547,36 @@ func handleGone(w http.ResponseWriter, r *http.Request) {
 		// ~150 KB page.
 		writeGone(w, "", "")
 	case isHostMetaPath(r.URL.Path):
-		// host-meta discovery. Honour the requested representation: JSON
-		// (JRD) for the .json variant, XRD XML otherwise.
+		// host-meta discovery, fetched programmatically. Keep the requested
+		// representation's Content-Type but drop the body — real Mastodon's
+		// own WebFinger 410 does the same (a bare `head 410`, no JSON).
 		if strings.HasSuffix(r.URL.Path, ".json") {
-			writeGone(w, "application/json; charset=utf-8", jsonGoneBody)
+			writeGone(w, "application/json; charset=utf-8", "")
 		} else {
-			writeGone(w, "application/xrd+xml; charset=utf-8", xrdGoneBody)
+			writeGone(w, "application/xrd+xml; charset=utf-8", "")
 		}
 	case isMatrixPath(r.URL.Path):
 		// Matrix standard error response shape. There is no dedicated
-		// "gone" errcode, so M_UNKNOWN carries a descriptive message.
+		// "gone" errcode, so M_UNKNOWN carries a descriptive message. Kept,
+		// since Matrix client SDKs genuinely parse errcode/error, unlike
+		// the server-to-server cases below.
 		writeGone(w, "application/json; charset=utf-8", `{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}`+"\n")
 	case isInboxPath(r.URL.Path), isActivityPub(r):
 		// Inbox delivery POSTs (by path, since they may lack Accept) and
-		// actor/status fetches (by Accept or Content-Type) both get the
-		// same JSON error as the API/discovery case below.
-		writeGone(w, "application/activity+json; charset=utf-8", jsonGoneBody)
+		// actor/status fetches (by Accept or Content-Type): server-to-server,
+		// and Mastodon's dereferencer only ever checks the status code, so
+		// an empty body is enough.
+		writeGone(w, "application/activity+json; charset=utf-8", "")
+	case isAPIPath(r.URL.Path):
+		// Mastodon REST API: the one JSON path with a human on the other
+		// end (see isAPIPath), so it's worth the body.
+		writeGone(w, "application/json; charset=utf-8", jsonGoneBody)
 	case isJSONPath(r.URL.Path),
 		wantsAny(r.Header.Get("Accept"), "application/json", "application/jrd+json"):
-		// Mastodon REST API, WebFinger / NodeInfo discovery, .json
-		// resources (all by path, any Accept), and generic JSON clients get
-		// a small JSON error instead of the ~150 KB HTML page.
-		writeGone(w, "application/json; charset=utf-8", jsonGoneBody)
+		// WebFinger / NodeInfo / OAuth discovery, .json resources (all by
+		// path, any Accept), and generic JSON clients: all programmatic,
+		// status-code-only consumers, so an empty body saves the bytes.
+		writeGone(w, "application/json; charset=utf-8", "")
 	case isFeedPath(r.URL.Path):
 		// Dead RSS/Atom feed: return the matching feed content type so
 		// readers recognise the 410 and stop polling. The body is empty.

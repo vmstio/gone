@@ -25,7 +25,7 @@ Example ActivityPub actor fetch:
 curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 # HTTP/1.1 410 Gone
 # Content-Type: application/activity+json; charset=utf-8
-# {"error":"Gone"}
+# (empty body)
 ```
 
 ## Run locally
@@ -56,13 +56,15 @@ flowchart TD
     B -- no --> C{"Dotfile probe or media request?\n(path segment starts with .,\nexcl. /.well-known/…;\nsee Media section)"}
     C -- yes --> C1["410, empty body"]
     C -- no --> E{"/.well-known/host-meta[.json] ?"}
-    E -- yes --> E1["410 XRD/JRD error\nxrd+xml or json"]
+    E -- yes --> E1["410, empty body\nxrd+xml or json"]
     E -- no --> F{"Matrix?\n/_matrix/… or\n/.well-known/matrix/…"}
     F -- yes --> F1["410 Matrix error JSON\n{errcode: M_UNKNOWN}"]
     F -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\nactivity+json / ld+json"}
-    H -- yes --> H1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json"]
-    H -- no --> I{"JSON API / discovery path?\n/api/…, webfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: json"}
-    I -- yes --> I1["410 {#quot;error#quot;:#quot;Gone#quot;}\njson"]
+    H -- yes --> H1["410, empty body\napplication/activity+json"]
+    H -- no --> G{"Mastodon REST API?\npath starts /api/"}
+    G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\njson"]
+    G -- no --> I{"JSON discovery path?\nwebfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: json"}
+    I -- yes --> I1["410, empty body\njson"]
     I -- no --> J{"Feed?\npath ends .rss / .atom"}
     J -- yes --> J1["410, empty body\nrss+xml / atom+xml"]
     J -- no --> L["410, HTML page"]
@@ -71,18 +73,24 @@ flowchart TD
 Every branch returns `410 Gone` except `/robots.txt`, which is a live `200`. A few
 notes that don't fit in the diagram:
 
+Body content only matters where a *human* reads it. The Mastodon REST API is
+consumed by apps (the official web client and third-party clients) that parse
+a JSON error's `error` field to show an alert, and Matrix client SDKs
+genuinely parse `errcode`/`error` — those two get a real body. Every other
+branch here is server-to-server or a library that only ever checks the `410`
+status (real Mastodon's own WebFinger 410 is a bare `head 410`, no body; its
+ActivityPub dereferencer only parses a response body on `200`), so they get
+an empty body instead of spending bytes on content nobody reads.
+
+A few more notes that don't fit in the diagram:
+
 - **Media** requests are covered in [Media](#media-former-s3-bucket-requests)
   below.
-- **ActivityPub inbox** and **ActivityPub** actor/status fetches both get the
-  same plain JSON error as JSON API and discovery below — real Mastodon only
-  branches on the `410` status when dereferencing (it parses the response
-  body solely on `200`), so an ActivityStreams `Tombstone` object buys
-  nothing over a generic error body.
 - **ActivityPub** `Content-Type` matching also covers AP POSTs that aren't to
-  an inbox.
-- **JSON API and discovery** is matched **by path**, since these clients
-  (apps, scrapers, OAuth libraries) often send a browser-style `Accept` or
-  none at all. `/api/…` is the Mastodon REST API and the highest-volume
+  an inbox, not just the shared/per-actor `/inbox` path.
+- **Mastodon REST API and JSON discovery** are both matched **by path**,
+  since these clients (apps, scrapers, OAuth libraries) often send a
+  browser-style `Accept` or none at all. `/api/…` is the highest-volume
   traffic this server sees, so a 17-byte JSON body instead of the ~15 KB page
   is the single biggest bandwidth saving. `/oauth/authorize` is deliberately
   excluded from the OAuth endpoints, since it's the interactive browser login
@@ -117,7 +125,7 @@ One line is logged per request (to stdout, where App Platform collects it) so
 you can see what is being probed. The Content-Type shows which branch matched:
 
 ```
-410 GET /users/alice 112B ct="application/activity+json; charset=utf-8" host="fedi.example" ip=203.0.113.5 ua="TestBot/1.0"
+410 GET /users/alice 0B ct="application/activity+json; charset=utf-8" host="fedi.example" ip=203.0.113.5 ua="TestBot/1.0"
 200 GET /robots.txt 26B ct="text/plain; charset=utf-8" host="example.com" ip=203.0.113.9 ua="Googlebot/2.1"
 ```
 
