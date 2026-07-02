@@ -1,0 +1,61 @@
+name = "gone"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+# Health checks aren't logged. Set to "false" to disable all request logging.
+[vars]
+LOG_REQUESTS = "true"
+
+# Bundle logo.svg as a raw text string rather than a binary asset, so it can
+# be base64-encoded into the page template at module load time.
+[[rules]]
+type = "Text"
+globs = ["**/*.svg"]
+fallthrough = true
+
+# Each hostname's zone must already be an active zone in this Cloudflare
+# account (orange-clouded DNS) for these to take effect. custom_domain = true
+# lets Wrangler create/manage the DNS record and certificate for each hostname.
+[[routes]]
+pattern = "vmcrawl.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.vmcrawl.com"
+custom_domain = true
+
+[[routes]]
+pattern = "mastoreqs.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.mastoreqs.com"
+custom_domain = true
+
+[[routes]]
+pattern = "vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "www.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "matrix.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "docs.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "status.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "cdn.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "dna.vmst.io"
+custom_domain = true

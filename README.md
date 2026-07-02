@@ -1,23 +1,24 @@
 # gone
 
-A tiny Go web server that responds to requests with `HTTP 410 Gone` in an
+A tiny Cloudflare Worker that responds to requests with `HTTP 410 Gone` in an
 appropriate format including a self-contained Mastodon error page for visitors.
 
 This lets one deployment gracefully retire a Mastodon/ActivityPub instance, a
 Matrix homeserver, and a media/attachment bucket at the same time.
 
-The Mastodon logo is embedded into the binary as SVG and inlined into the
-page as a base64 data URI, so the app has no external dependencies and
-serves a single 410 response per request. It's rasterized onto a `<canvas>`
-at a higher resolution than its intrinsic size (for crisp display) and
-disintegrates into flying, fading tiles on hover/click — a "Thanos snap"
-effect. Dark mode follows the browser's `prefers-color-scheme`.
+The Mastodon logo is bundled as SVG and inlined into the page as a base64
+data URI, so the Worker has no external dependencies and serves a single 410
+response per request. It's rasterized onto a `<canvas>` at a higher
+resolution than its intrinsic size (for crisp display) and disintegrates into
+flying, fading tiles on hover/click — a "Thanos snap" effect. Dark mode
+follows the browser's `prefers-color-scheme`.
 
-The HTML page is ~9 KB (~4.2 KB gzipped).
+The HTML page is ~9 KB (~4.2 KB gzipped, handled automatically by
+Cloudflare's edge).
 
 The displayed domain is taken from the request (`X-Forwarded-Host`, falling
-back to `Host`, with any port stripped and the value HTML-escaped), so a single
-deployment can serve any number of domains.
+back to `Host`, with any port and leading `www.` stripped, and the value
+HTML-escaped), so a single deployment can serve any number of domains.
 
 Example ActivityPub actor fetch:
 
@@ -31,16 +32,27 @@ curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 ## Run locally
 
 ```sh
-go run .
-# then visit http://localhost:8080
+npx wrangler dev
+# then visit http://localhost:8787
 ```
-
-Listens on `$PORT` (default `8080`).
 
 ```sh
-curl -i http://localhost:8080/
+curl -i http://localhost:8787/
 # HTTP/1.1 410 Gone
 ```
+
+## Deploy
+
+Each hostname's zone must already be an active zone in your Cloudflare
+account (orange-clouded DNS). Add a `[[routes]]` entry per hostname in
+`wrangler.toml` with `custom_domain = true`, then:
+
+```sh
+npx wrangler deploy
+```
+
+Wrangler creates/manages the DNS record and certificate for each attached
+hostname.
 
 ## Content negotiation
 
@@ -124,36 +136,23 @@ request counts as media when any of:
 
 ## Logging
 
-One line is logged per request (to stdout, where App Platform collects it) so
-you can see what is being probed. The Content-Type shows which branch matched:
+One line is logged per request via `console.log`, visible with `wrangler
+tail` or Logpush, so you can see what is being probed. The Content-Type shows
+which branch matched:
 
 ```
-410 GET /users/alice 0B ct="application/activity+json; charset=utf-8" host="fedi.example" ip=203.0.113.5 ua="TestBot/1.0"
-200 GET /robots.txt 26B ct="text/plain; charset=utf-8" host="example.com" ip=203.0.113.9 ua="Googlebot/2.1"
+410 GET /users/alice ct="application/activity+json; charset=utf-8" host="fedi.example" ip=203.0.113.5 ua="TestBot/1.0"
+200 GET /robots.txt ct="text/plain; charset=utf-8" host="example.com" ip=203.0.113.9 ua="Googlebot/2.1"
 ```
 
-Fields: status, method, path, response bytes, `ct` (Content-Type), `host`
-(requested host), `ip` (first `X-Forwarded-For` entry, falling back to the
-remote address), and `ua` (User-Agent). Health checks (`/healthz`) are not
-logged. Set `LOG_REQUESTS=false` to disable request logging entirely.
+Fields: status, method, path, `ct` (Content-Type), `host` (requested host),
+`ip` (`CF-Connecting-IP`, falling back to the first `X-Forwarded-For`
+entry), and `ua` (User-Agent). Health checks (`/healthz`) are not logged. Set
+the `LOG_REQUESTS` var to `"false"` in `wrangler.toml` to disable request
+logging entirely.
 
 ## Endpoints
 
 - `/*` — returns `410 Gone`; response chosen by path/headers (see above).
 - `/robots.txt` — returns `200 OK` with a disallow-all directive.
 - `/healthz` — returns `200 OK` for platform health checks (not logged).
-
-## Deploy to DigitalOcean App Platform
-
-App Platform's native Go buildpack builds this with no Dockerfile. The included
-[`.do/app.yaml`](.do/app.yaml) app spec configures the service and points the
-health check at `/healthz` (App Platform treats a 410 as unhealthy, so the
-default `/` health check would fail).
-
-Create the app from the dashboard (pointing at this repo) or with the CLI:
-
-```sh
-doctl apps create --spec .do/app.yaml
-```
-
-Update the `github.repo` field in `.do/app.yaml` to match your repository.
