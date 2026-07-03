@@ -69,10 +69,8 @@ flowchart TD
     C -- yes --> C1["410, empty body\nrequested media type"]
     C -- no --> E{"/.well-known/host-meta ?"}
     E -- yes --> E1["410 &lt;Error&gt;Gone&lt;/Error&gt;\napplication/xrd+xml"]
-    E -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\napplication/activity+json /\napplication/ld+json"}
-    H -- yes --> H1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json"]
-    H -- no --> G{"Mastodon REST API, or\nJSON discovery path?\npath starts /api/, or\nwebfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: application/json"}
-    G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/json"]
+    E -- no --> G{"ActivityPub, REST API, or\nWebfinger/NodeInfo?\npath ends /inbox, path starts /api/,\nwebfinger, nodeinfo,\noauth metadata & endpoints, *.json, or\nAccept/Content-Type is application/json /\napplication/activity+json / application/ld+json"}
+    G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json / application/json"]
     G -- no --> J{"Feed?\npath ends .rss / .atom"}
     J -- yes --> J1["410, empty body\napplication/rss+xml /\napplication/atom+xml"]
     J -- no --> L["410, HTML page\ntext/html"]
