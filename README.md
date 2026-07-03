@@ -3,8 +3,8 @@
 A tiny Cloudflare Worker that responds to requests with `HTTP 410 Gone` in an
 appropriate format including a self-contained Mastodon error page for visitors.
 
-This lets one deployment gracefully retire a Mastodon/ActivityPub instance, a
-Matrix homeserver, and a media/attachment bucket at the same time.
+This lets one deployment gracefully retire a Mastodon/ActivityPub instance
+and a media/attachment bucket at the same time.
 
 The Mastodon logo is bundled as SVG and inlined into the page as a base64
 data URI, so the Worker has no external dependencies and serves a single 410
@@ -65,13 +65,11 @@ from the request path and headers, checked in this order. Every response is
 flowchart TD
     A["Request"] --> B{"/robots.txt ?"}
     B -- yes --> B1["200 text/plain\nUser-agent: * / Disallow: /"]
-    B -- no --> C{"Dotfile probe, WordPress probe,\nor media request?\n410, empty body"}
+    B -- no --> C{"Media request?"}
     C -- yes --> C1["410, empty body"]
     C -- no --> E{"/.well-known/host-meta[.json] ?"}
     E -- yes --> E1["410, empty body\nxrd+xml or json"]
-    E -- no --> F{"Matrix?\n/_matrix/… or\n/.well-known/matrix/…"}
-    F -- yes --> F1["410 Matrix error JSON\n{errcode: M_UNKNOWN}"]
-    F -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\nactivity+json / ld+json"}
+    E -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\nactivity+json / ld+json"}
     H -- yes --> H1["410, empty body\napplication/activity+json"]
     H -- no --> G{"Mastodon REST API?\npath starts /api/"}
     G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\njson"]
@@ -79,9 +77,7 @@ flowchart TD
     I -- yes --> I1["410, empty body\njson"]
     I -- no --> J{"Feed?\npath ends .rss / .atom"}
     J -- yes --> J1["410, empty body\nrss+xml / atom+xml"]
-    J -- no --> K{"/tags/… ?"}
-    K -- yes --> K1["410, empty body"]
-    K -- no --> L["410, HTML page"]
+    J -- no --> L["410, HTML page"]
 ```
 
 Every branch returns `410 Gone` except `/robots.txt`, which is a live `200`. A few
@@ -89,12 +85,12 @@ notes that don't fit in the diagram:
 
 Body content only matters where a *human* reads it. The Mastodon REST API is
 consumed by apps (the official web client and third-party clients) that parse
-a JSON error's `error` field to show an alert, and Matrix client SDKs
-genuinely parse `errcode`/`error` — those two get a real body. Every other
-branch here is server-to-server or a library that only ever checks the `410`
-status (real Mastodon's own WebFinger 410 is a bare `head 410`, no body; its
-ActivityPub dereferencer only parses a response body on `200`), so they get
-an empty body instead of spending bytes on content nobody reads.
+a JSON error's `error` field to show an alert — that's the one branch that
+gets a real body. Every other branch here is server-to-server or a library
+that only ever checks the `410` status (real Mastodon's own WebFinger 410 is
+a bare `head 410`, no body; its ActivityPub dereferencer only parses a
+response body on `200`), so they get an empty body instead of spending bytes
+on content nobody reads.
 
 A few more notes that don't fit in the diagram:
 
@@ -111,7 +107,6 @@ A few more notes that don't fit in the diagram:
   page and still gets the HTML page.
 - **Feed** matches are a dead end for readers that would otherwise keep
   polling.
-- **`/tags/…`** matches are a dead end for crawlers, not human visits.
 
 All 410 responses carry `Cache-Control: private, max-age=86400` so the
 requesting client holds on to the 410 and stops re-requesting a permanently

@@ -270,13 +270,6 @@ function wantsAny(headerValue, ...mediaTypes) {
   return mediaTypes.some((mt) => v.includes(mt));
 }
 
-// isMatrixPath reports whether the request targets a Matrix Client-Server or
-// Server-Server (federation) API, or Matrix delegation discovery. Matrix
-// clients often omit an Accept header, so the path is the reliable signal.
-function isMatrixPath(p) {
-  return p.startsWith("/_matrix/") || p.startsWith("/.well-known/matrix/");
-}
-
 // isHostMetaPath reports whether the request targets the host-meta discovery
 // document (RFC 6415) that bootstraps WebFinger. It is served as XRD XML by
 // default, with a JSON (JRD) variant at the .json suffix.
@@ -316,8 +309,8 @@ function isOAuthJSONPath(p) {
 // isAPIPath reports whether the request targets the Mastodon REST API. Unlike
 // every other path below, its clients are human-facing apps (the official
 // web UI and third-party clients) that read the JSON error's "error" field
-// to show the user an alert, so this is the one path — besides Matrix —
-// worth spending a body on.
+// to show the user an alert, so this is the one path worth spending a body
+// on.
 function isAPIPath(p) {
   return p.startsWith("/api/");
 }
@@ -336,29 +329,6 @@ function isJSONPath(p) {
 // feed answered with a 410 tells readers to stop polling.
 function isFeedPath(p) {
   return p.endsWith(".rss") || p.endsWith(".atom");
-}
-
-// isHiddenProbe reports whether the request targets a dotfile (a path segment
-// starting with "."), as vulnerability scanners hunting for /.env, /.git, and
-// the like do. The legitimate /.well-known/ tree is excluded. These get an
-// empty 410 instead of the ~9 KB page.
-function isHiddenProbe(p) {
-  if (p.startsWith("/.well-known/")) return false;
-  return p.split("/").some((seg) => seg.length > 1 && seg[0] === ".");
-}
-
-// wordPressProbeStrings are path substrings that only ever appear in
-// vulnerability scanner traffic hunting for known WordPress exploits — this
-// server has never run WordPress.
-const wordPressProbeStrings = [
-  "wp-includes", "wp-admin", "wp-content", "wp-login.php",
-  "xmlrpc.php", "wp-json", "wp-config", "wp-cron.php",
-];
-
-// isWordPressProbe reports whether the request targets a WordPress path.
-// These get an empty 410 instead of the ~9 KB page.
-function isWordPressProbe(p) {
-  return wordPressProbeStrings.some((s) => p.includes(s));
 }
 
 // isInboxPath reports whether the request targets an ActivityPub inbox (the
@@ -493,11 +463,9 @@ function handleGone(request) {
       status: 200,
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
-  } else if (isHiddenProbe(path) || isWordPressProbe(path) || isMediaRequest(request, path)) {
-    // Vulnerability scanners probing for dotfiles (.env, .git, …) or
-    // WordPress internals (wp-includes), and former bucket media (an
-    // <img>/<video> tag or a server refetch, which ignores any body), all
-    // get an empty 410 rather than the ~9 KB page.
+  } else if (isMediaRequest(request, path)) {
+    // Former bucket media (an <img>/<video> tag or a server refetch, which
+    // ignores any body) gets an empty 410 rather than the ~9 KB page.
     response = writeGone("", "");
   } else if (isHostMetaPath(path)) {
     // host-meta discovery, fetched programmatically. Keep the requested
@@ -506,15 +474,6 @@ function handleGone(request) {
     response = path.endsWith(".json")
       ? writeGone("application/json; charset=utf-8", "")
       : writeGone("application/xrd+xml; charset=utf-8", "");
-  } else if (isMatrixPath(path)) {
-    // Matrix standard error response shape. There is no dedicated "gone"
-    // errcode, so M_UNKNOWN carries a descriptive message. Kept, since
-    // Matrix client SDKs genuinely parse errcode/error, unlike the
-    // server-to-server cases below.
-    response = writeGone(
-      "application/json; charset=utf-8",
-      '{"errcode":"M_UNKNOWN","error":"This Matrix homeserver has been decommissioned."}\n'
-    );
   } else if (isInboxPath(path) || isActivityPub(request)) {
     // Inbox delivery POSTs (by path, since they may lack Accept) and
     // actor/status fetches (by Accept or Content-Type): server-to-server,
@@ -536,10 +495,6 @@ function handleGone(request) {
     response = path.endsWith(".atom")
       ? writeGone("application/atom+xml; charset=utf-8", "")
       : writeGone("application/rss+xml; charset=utf-8", "");
-  } else if (path.startsWith("/tags/")) {
-    // Hashtag pages are crawler traffic, not human visits, so drop them with
-    // an empty 410 instead of the ~9 KB page.
-    response = writeGone("", "");
   } else {
     response = new Response(renderPage(domainFromRequest(request)), {
       status: 410,
