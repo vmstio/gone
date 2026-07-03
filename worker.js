@@ -512,10 +512,10 @@ function handleGone(request) {
     response = writeGone("application/xrd+xml; charset=utf-8", xrdGoneBody);
   } else if (isInboxPath(path) || isActivityPub(request)) {
     // Inbox delivery POSTs (by path, since they may lack Accept) and
-    // actor/status fetches (by Accept or Content-Type): server-to-server,
-    // and Mastodon's dereferencer only ever checks the status code, so an
-    // empty body is enough.
-    response = writeGone("application/activity+json; charset=utf-8", "");
+    // actor/status fetches (by Accept or Content-Type): same JSON error
+    // body as the branch below, but kept as application/activity+json since
+    // that's the representation these clients actually asked for.
+    response = writeGone("application/activity+json; charset=utf-8", jsonGoneBody);
   } else if (
     isAPIPath(path) ||
     isJSONPath(path) ||

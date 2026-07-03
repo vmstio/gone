@@ -26,7 +26,7 @@ Example ActivityPub actor fetch:
 curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 # HTTP/1.1 410 Gone
 # Content-Type: application/activity+json; charset=utf-8
-# (empty body)
+# {"error":"Gone"}
 ```
 
 ## Run locally
@@ -64,13 +64,13 @@ from the request path and headers, checked in this order. Every response is
 ```mermaid
 flowchart TD
     A["Request"] --> B{"/robots.txt ?"}
-    B -- yes --> B1["200 text/plain\nUser-agent: * / Disallow: /"]
+    B -- yes --> B1["200, User-agent: * / Disallow: /\ntext/plain"]
     B -- no --> C{"Media request?"}
     C -- yes --> C1["410, empty body\nrequested media type"]
     C -- no --> E{"/.well-known/host-meta ?"}
     E -- yes --> E1["410 &lt;Error&gt;Gone&lt;/Error&gt;\napplication/xrd+xml"]
     E -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\napplication/activity+json /\napplication/ld+json"}
-    H -- yes --> H1["410, empty body\napplication/activity+json"]
+    H -- yes --> H1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json"]
     H -- no --> G{"Mastodon REST API, or\nJSON discovery path?\npath starts /api/, or\nwebfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: application/json"}
     G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/json"]
     G -- no --> J{"Feed?\npath ends .rss / .atom"}
@@ -84,19 +84,25 @@ notes that don't fit in the diagram:
 Body content mostly matters where a *human* reads it. The Mastodon REST API
 is consumed by apps (the official web client and third-party clients) that
 parse a JSON error's `error` field to show an alert, so it shares that small
-JSON body with the JSON discovery paths (WebFinger, NodeInfo, OAuth/OIDC
-metadata, `*.json`) even though those are programmatic, status-code-only
+JSON body with ActivityPub (inbox deliveries and actor/status fetches) and
+the JSON discovery paths (WebFinger, NodeInfo, OAuth/OIDC metadata,
+`*.json`) even though most of those are programmatic, status-code-only
 consumers — the body is cheap enough that a single shared response is
-simpler than special-casing each one. host-meta gets the equivalent as XRD
-XML. ActivityPub and feed responses stay empty, since Mastodon's own
-dereferencer and feed readers never parse a 410 body.
+simpler than special-casing each one. ActivityPub keeps its own
+`application/activity+json` Content-Type rather than the plain
+`application/json` the other branches use, since that's the representation
+those clients actually asked for. host-meta gets the JSON error's XRD/XML
+equivalent. Feed responses stay empty, since feed readers never parse a 410
+body.
 
 A few more notes that don't fit in the diagram:
 
 - **Media** requests are covered in [Media](#media-former-s3-bucket-requests)
   below.
-- **ActivityPub** `Content-Type` matching also covers AP POSTs that aren't to
-  an inbox, not just the shared/per-actor `/inbox` path.
+- **ActivityPub** is matched by path (`/inbox`, including per-actor
+  `/users/x/inbox`) or by either the `Accept` or `Content-Type` header being
+  `application/activity+json` **or** `application/ld+json` — inbox POSTs may
+  omit `Accept` entirely, and actor/status fetches may use either media type.
 - **Mastodon REST API and JSON discovery** are both matched **by path**,
   since these clients (apps, scrapers, OAuth libraries) often send a
   browser-style `Accept` or none at all. `/oauth/authorize` is deliberately
