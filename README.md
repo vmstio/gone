@@ -67,17 +67,17 @@ flowchart TD
     B -- yes --> B1["200 text/plain\nUser-agent: * / Disallow: /"]
     B -- no --> C{"Media request?"}
     C -- yes --> C1["410, empty body"]
-    C -- no --> E{"/.well-known/host-meta[.json] ?"}
-    E -- yes --> E1["410, empty body\nxrd+xml or json"]
-    E -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\nactivity+json / ld+json"}
+    C -- no --> E{"/.well-known/host-meta ?"}
+    E -- yes --> E1["410, empty body\napplication/xrd+xml"]
+    E -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\napplication/activity+json /\napplication/ld+json"}
     H -- yes --> H1["410, empty body\napplication/activity+json"]
     H -- no --> G{"Mastodon REST API?\npath starts /api/"}
-    G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\njson"]
-    G -- no --> I{"JSON discovery path?\nwebfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: json"}
-    I -- yes --> I1["410, empty body\njson"]
+    G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/json"]
+    G -- no --> I{"JSON discovery path?\nwebfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: application/json"}
+    I -- yes --> I1["410, empty body\napplication/json"]
     I -- no --> J{"Feed?\npath ends .rss / .atom"}
-    J -- yes --> J1["410, empty body\nrss+xml / atom+xml"]
-    J -- no --> L["410, HTML page"]
+    J -- yes --> J1["410, empty body\napplication/rss+xml /\napplication/atom+xml"]
+    J -- no --> L["410, HTML page\ntext/html"]
 ```
 
 Every branch returns `410 Gone` except `/robots.txt`, which is a live `200`. A few

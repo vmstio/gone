@@ -271,10 +271,9 @@ function wantsAny(headerValue, ...mediaTypes) {
 }
 
 // isHostMetaPath reports whether the request targets the host-meta discovery
-// document (RFC 6415) that bootstraps WebFinger. It is served as XRD XML by
-// default, with a JSON (JRD) variant at the .json suffix.
+// document (RFC 6415) that bootstraps WebFinger. It is served as XRD XML.
 function isHostMetaPath(p) {
-  return p === "/.well-known/host-meta" || p === "/.well-known/host-meta.json";
+  return p === "/.well-known/host-meta";
 }
 
 // isNodeInfoPath reports whether the request targets NodeInfo discovery or a
@@ -468,12 +467,10 @@ function handleGone(request) {
     // ignores any body) gets an empty 410 rather than the ~9 KB page.
     response = writeGone("", "");
   } else if (isHostMetaPath(path)) {
-    // host-meta discovery, fetched programmatically. Keep the requested
-    // representation's Content-Type but drop the body — real Mastodon's own
-    // WebFinger 410 does the same (a bare `head 410`, no JSON).
-    response = path.endsWith(".json")
-      ? writeGone("application/json; charset=utf-8", "")
-      : writeGone("application/xrd+xml; charset=utf-8", "");
+    // host-meta discovery, fetched programmatically. Drop the body — real
+    // Mastodon's own WebFinger 410 does the same (a bare `head 410`, no
+    // JSON).
+    response = writeGone("application/xrd+xml; charset=utf-8", "");
   } else if (isInboxPath(path) || isActivityPub(request)) {
     // Inbox delivery POSTs (by path, since they may lack Accept) and
     // actor/status fetches (by Accept or Content-Type): server-to-server,
