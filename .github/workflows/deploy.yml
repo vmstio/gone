@@ -1,0 +1,38 @@
+name: Deploy Worker
+
+# Deploy to Cloudflare Workers from GitHub Actions on every push to main,
+# as an alternative to Cloudflare's Git-connected Workers Builds. This runs
+# the same `wrangler deploy` that works locally.
+#
+# Requires one repository secret:
+#   CLOUDFLARE_API_TOKEN - a token with the "Edit Cloudflare Workers"
+#     permission (Account > Workers Scripts > Edit). Once the custom-domain
+#     routes are re-enabled in wrangler.toml, the token also needs Zone > DNS >
+#     Edit and Zone > Workers Routes > Edit for each attached zone.
+#
+# If the token can access more than one Cloudflare account, also add a
+# CLOUDFLARE_ACCOUNT_ID secret and pass it as `accountId:` below.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
