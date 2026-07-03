@@ -418,9 +418,13 @@ function isMediaRequest(request, p) {
   );
 }
 
-// renderPage fills the per-request domain into the cached template.
+// renderPage fills the per-request domain into the cached template. The
+// replacement is a function so that "$" sequences in the (client-controlled)
+// domain are inserted literally instead of being interpreted as replaceAll
+// substitution patterns like $& or $'.
 function renderPage(domain) {
-  return pageTpl.replaceAll("__DOMAIN__", escapeHTML(domain));
+  const escaped = escapeHTML(domain);
+  return pageTpl.replaceAll("__DOMAIN__", () => escaped);
 }
 
 // jsonGoneBody is the small JSON error for the Mastodon REST API — the one
