@@ -25,53 +25,46 @@ fallthrough = true
 # Each hostname's zone must already be an active zone in this Cloudflare
 # account (orange-clouded DNS) for these to take effect. custom_domain = true
 # lets Wrangler create/manage the DNS record and certificate for each hostname.
-#
-# Temporarily commented out to isolate a deploy-time HTTP 400: attaching a
-# custom domain fails the whole deploy if its zone isn't active in this
-# account, the hostname is already bound to another Worker/Pages project, or a
-# conflicting DNS record exists. With these removed the Worker deploys to its
-# workers.dev subdomain only; re-enable them one at a time to find the
-# offending hostname.
-# [[routes]]
-# pattern = "vmcrawl.com"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "www.vmcrawl.com"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "mastoreqs.com"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "www.mastoreqs.com"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "vmst.io"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "www.vmst.io"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "matrix.vmst.io"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "docs.vmst.io"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "status.vmst.io"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "cdn.vmst.io"
-# custom_domain = true
-#
-# [[routes]]
-# pattern = "dna.vmst.io"
-# custom_domain = true
+[[routes]]
+pattern = "vmcrawl.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.vmcrawl.com"
+custom_domain = true
+
+[[routes]]
+pattern = "mastoreqs.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.mastoreqs.com"
+custom_domain = true
+
+[[routes]]
+pattern = "vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "www.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "matrix.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "docs.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "status.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "cdn.vmst.io"
+custom_domain = true
+
+[[routes]]
+pattern = "dna.vmst.io"
+custom_domain = true
