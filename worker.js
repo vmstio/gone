@@ -320,16 +320,10 @@ function isJSONPath(p) {
   return isJSONDiscoveryPath(p) || isOAuthJSONPath(p) || p.endsWith(".json");
 }
 
-// feedExts maps a feed extension to the Content-Type a dead RSS/Atom feed
-// should answer with, so readers recognise the 410 and stop polling.
-const feedExts = new Map([
-  [".rss", "application/rss+xml; charset=utf-8"],
-  [".atom", "application/atom+xml; charset=utf-8"],
-]);
-
-// isFeedPath reports whether the request is for an RSS or Atom feed.
+// isFeedPath reports whether the request is for Mastodon's RSS feed — the
+// only syndication format it serves (there is no Atom equivalent).
 function isFeedPath(p) {
-  return feedExts.has(extOf(p));
+  return p.endsWith(".rss");
 }
 
 // isInboxPath reports whether the request targets an ActivityPub inbox (the
@@ -526,9 +520,9 @@ function handleGone(request) {
     // the same small JSON error body.
     response = writeGone("application/json; charset=utf-8", jsonGoneBody);
   } else if (isFeedPath(path)) {
-    // Dead RSS/Atom feed: return the matching feed content type so readers
-    // recognise the 410 and stop polling. The body is empty.
-    response = writeGone(feedExts.get(extOf(path)), "");
+    // Dead RSS feed: return the matching content type so readers recognise
+    // the 410 and stop polling. The body is empty.
+    response = writeGone("application/rss+xml; charset=utf-8", "");
   } else {
     response = new Response(renderPage(domainFromRequest(request)), {
       status: 410,

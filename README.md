@@ -63,16 +63,16 @@ from the request path and headers, checked in this order. Every response is
 
 ```mermaid
 flowchart TD
-    A["Request"] --> B{"/robots.txt ?"}
-    B -- yes --> B1["200, User-agent: * / Disallow: /\ntext/plain"]
+    A["Request"] --> B{"robots.txt Request?"}
+    B -- yes --> B1["200, * Disallow\ntext/plain"]
     B -- no --> C{"Media request?"}
     C -- yes --> C1["410, empty body\nrequested media type"]
-    C -- no --> E{"/.well-known/host-meta ?"}
+    C -- no --> E{"XML host-meta request?"}
     E -- yes --> E1["410 &lt;Error&gt;Gone&lt;/Error&gt;\napplication/xrd+xml"]
-    E -- no --> G{"ActivityPub, REST API, or\nWebfinger/NodeInfo?\npath ends /inbox, path starts /api/,\nwebfinger, nodeinfo,\noauth metadata & endpoints, *.json, or\nAccept/Content-Type is application/json /\napplication/activity+json / application/ld+json"}
+    E -- no --> G{"ActivityPub, REST API, Webfinger, or NodeInfo request?"}
     G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json / application/json"]
-    G -- no --> J{"Feed?\npath ends .rss / .atom"}
-    J -- yes --> J1["410, empty body\napplication/rss+xml /\napplication/atom+xml"]
+    G -- no --> J{"RSS feed request?\npath ends .rss"}
+    J -- yes --> J1["410, empty body\napplication/rss+xml"]
     J -- no --> L["410, HTML page\ntext/html"]
 ```
 
@@ -106,8 +106,8 @@ A few more notes that don't fit in the diagram:
   browser-style `Accept` or none at all. `/oauth/authorize` is deliberately
   excluded from the OAuth endpoints, since it's the interactive browser login
   page and still gets the HTML page.
-- **Feed** matches are a dead end for readers that would otherwise keep
-  polling.
+- **Feed** matches are `.rss` only — Mastodon never served an Atom feed — and
+  are a dead end for readers that would otherwise keep polling.
 
 All 410 responses carry `Cache-Control: private, max-age=86400` so the
 requesting client holds on to the 410 and stops re-requesting a permanently
