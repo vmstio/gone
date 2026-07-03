@@ -305,29 +305,31 @@ function isOAuthJSONPath(p) {
   return p === "/oauth/token" || p === "/oauth/revoke" || p === "/oauth/userinfo";
 }
 
-// isAPIPath reports whether the request targets the Mastodon REST API. Unlike
-// every other path below, its clients are human-facing apps (the official
-// web UI and third-party clients) that read the JSON error's "error" field
-// to show the user an alert, so this is the one path worth spending a body
-// on.
+// isAPIPath reports whether the request targets the Mastodon REST API. Its
+// clients are human-facing apps (the official web UI and third-party
+// clients) that read the JSON error's "error" field to show the user an
+// alert.
 function isAPIPath(p) {
   return p.startsWith("/api/");
 }
 
 // isJSONPath reports whether the request should get a JSON response
 // regardless of the Accept header: fediverse JSON discovery, OAuth/OIDC
-// machine endpoints, and any .json resource. These are all fetched
-// programmatically by servers or libraries that only ever check the status
-// code — real Mastodon's own WebFinger 410 is a bare `head 410`, no body —
-// so an empty body is enough.
+// machine endpoints, and any .json resource.
 function isJSONPath(p) {
   return isJSONDiscoveryPath(p) || isOAuthJSONPath(p) || p.endsWith(".json");
 }
 
-// isFeedPath reports whether the request is for an RSS or Atom feed. A dead
-// feed answered with a 410 tells readers to stop polling.
+// feedExts maps a feed extension to the Content-Type a dead RSS/Atom feed
+// should answer with, so readers recognise the 410 and stop polling.
+const feedExts = new Map([
+  [".rss", "application/rss+xml; charset=utf-8"],
+  [".atom", "application/atom+xml; charset=utf-8"],
+]);
+
+// isFeedPath reports whether the request is for an RSS or Atom feed.
 function isFeedPath(p) {
-  return p.endsWith(".rss") || p.endsWith(".atom");
+  return feedExts.has(extOf(p));
 }
 
 // isInboxPath reports whether the request targets an ActivityPub inbox (the
@@ -348,14 +350,32 @@ function isActivityPub(request) {
   );
 }
 
-// mediaExts are file extensions that a bucket of images/attachments would have
-// served. Requests for these get an empty 410 rather than a page body.
-const mediaExts = new Set([
-  ".jpg", ".jpeg", ".png", ".gif", ".webp",
-  ".avif", ".bmp", ".svg", ".ico", ".heic",
-  ".tif", ".tiff",
-  ".mp4", ".webm", ".mov", ".m4v", ".ogv",
-  ".mp3", ".ogg", ".oga", ".m4a", ".wav", ".flac",
+// mediaExts maps a media file extension to the Content-Type a bucket of
+// images/attachments would have served it as.
+const mediaExts = new Map([
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".png", "image/png"],
+  [".gif", "image/gif"],
+  [".webp", "image/webp"],
+  [".avif", "image/avif"],
+  [".bmp", "image/bmp"],
+  [".svg", "image/svg+xml"],
+  [".ico", "image/x-icon"],
+  [".heic", "image/heic"],
+  [".tif", "image/tiff"],
+  [".tiff", "image/tiff"],
+  [".mp4", "video/mp4"],
+  [".webm", "video/webm"],
+  [".mov", "video/quicktime"],
+  [".m4v", "video/x-m4v"],
+  [".ogv", "video/ogg"],
+  [".mp3", "audio/mpeg"],
+  [".ogg", "audio/ogg"],
+  [".oga", "audio/ogg"],
+  [".m4a", "audio/mp4"],
+  [".wav", "audio/wav"],
+  [".flac", "audio/flac"],
 ]);
 
 function extOf(p) {
@@ -387,6 +407,19 @@ function isMediaRequest(request, p) {
   );
 }
 
+// mediaContentType returns the Content-Type to echo back for a media
+// request: the extension's known type if the path has one, otherwise the
+// specific image/video/audio token from Accept (for extensionless paths like
+// bare /media_proxy/… hits or hotlinked <img> tags with a browser Accept).
+function mediaContentType(request, p) {
+  const byExt = mediaExts.get(extOf(p));
+  if (byExt) return byExt;
+  const match = (request.headers.get("Accept") || "")
+    .toLowerCase()
+    .match(/(?:image|video|audio)\/[a-z0-9.+-]+/);
+  return match ? match[0] : "";
+}
+
 // renderPage fills the per-request domain into the cached template. The
 // replacement is a function so that "$" sequences in the (client-controlled)
 // domain are inserted literally instead of being interpreted as replaceAll
@@ -396,10 +429,15 @@ function renderPage(domain) {
   return pageTpl.replaceAll("__DOMAIN__", () => escaped);
 }
 
-// jsonGoneBody is the small JSON error for the Mastodon REST API — the one
-// path with a human on the other end. Mastodon's own web client (and
-// third-party apps) parse the "error" field to show an alert.
+// jsonGoneBody is the small JSON error shared by the Mastodon REST API and
+// JSON discovery paths. Mastodon's own web client (and third-party apps)
+// parse the "error" field to show an alert.
 const jsonGoneBody = '{"error":"Gone"}\n';
+
+// xrdGoneBody is the XRD/XML equivalent of jsonGoneBody, for host-meta.
+const xrdGoneBody =
+  '<?xml version="1.0" encoding="UTF-8"?>\n' +
+  '<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0"><Error>Gone</Error></XRD>\n';
 
 // writeGone builds a 410 response with the given Content-Type and body. An
 // empty contentType or body is skipped, leaving no body written.
@@ -464,34 +502,33 @@ function handleGone(request) {
     });
   } else if (isMediaRequest(request, path)) {
     // Former bucket media (an <img>/<video> tag or a server refetch, which
-    // ignores any body) gets an empty 410 rather than the ~9 KB page.
-    response = writeGone("", "");
+    // ignores any body) gets an empty 410 rather than the ~9 KB page, echoing
+    // back the requested media type as Content-Type.
+    response = writeGone(mediaContentType(request, path), "");
   } else if (isHostMetaPath(path)) {
-    // host-meta discovery, fetched programmatically. Drop the body — real
-    // Mastodon's own WebFinger 410 does the same (a bare `head 410`, no
-    // JSON).
-    response = writeGone("application/xrd+xml; charset=utf-8", "");
+    // host-meta discovery, fetched programmatically. Real Mastodon's own
+    // host-meta 410 is a bare `head 410`, but a small XRD error body costs
+    // little and mirrors the JSON error given to the other discovery paths.
+    response = writeGone("application/xrd+xml; charset=utf-8", xrdGoneBody);
   } else if (isInboxPath(path) || isActivityPub(request)) {
     // Inbox delivery POSTs (by path, since they may lack Accept) and
     // actor/status fetches (by Accept or Content-Type): server-to-server,
     // and Mastodon's dereferencer only ever checks the status code, so an
     // empty body is enough.
     response = writeGone("application/activity+json; charset=utf-8", "");
-  } else if (isAPIPath(path)) {
-    // Mastodon REST API: the one JSON path with a human on the other end
-    // (see isAPIPath), so it's worth the body.
+  } else if (
+    isAPIPath(path) ||
+    isJSONPath(path) ||
+    wantsAny(request.headers.get("Accept"), "application/json", "application/jrd+json")
+  ) {
+    // Mastodon REST API, WebFinger / NodeInfo / OAuth discovery, .json
+    // resources (all by path, any Accept), and generic JSON clients all get
+    // the same small JSON error body.
     response = writeGone("application/json; charset=utf-8", jsonGoneBody);
-  } else if (isJSONPath(path) || wantsAny(request.headers.get("Accept"), "application/json", "application/jrd+json")) {
-    // WebFinger / NodeInfo / OAuth discovery, .json resources (all by path,
-    // any Accept), and generic JSON clients: all programmatic,
-    // status-code-only consumers, so an empty body saves the bytes.
-    response = writeGone("application/json; charset=utf-8", "");
   } else if (isFeedPath(path)) {
     // Dead RSS/Atom feed: return the matching feed content type so readers
     // recognise the 410 and stop polling. The body is empty.
-    response = path.endsWith(".atom")
-      ? writeGone("application/atom+xml; charset=utf-8", "")
-      : writeGone("application/rss+xml; charset=utf-8", "");
+    response = writeGone(feedExts.get(extOf(path)), "");
   } else {
     response = new Response(renderPage(domainFromRequest(request)), {
       status: 410,

@@ -66,16 +66,14 @@ flowchart TD
     A["Request"] --> B{"/robots.txt ?"}
     B -- yes --> B1["200 text/plain\nUser-agent: * / Disallow: /"]
     B -- no --> C{"Media request?"}
-    C -- yes --> C1["410, empty body"]
+    C -- yes --> C1["410, empty body\nrequested media type"]
     C -- no --> E{"/.well-known/host-meta ?"}
-    E -- yes --> E1["410, empty body\napplication/xrd+xml"]
+    E -- yes --> E1["410 &lt;Error&gt;Gone&lt;/Error&gt;\napplication/xrd+xml"]
     E -- no --> H{"ActivityPub?\npath ends /inbox, or\nAccept/Content-Type is\napplication/activity+json /\napplication/ld+json"}
     H -- yes --> H1["410, empty body\napplication/activity+json"]
-    H -- no --> G{"Mastodon REST API?\npath starts /api/"}
+    H -- no --> G{"Mastodon REST API, or\nJSON discovery path?\npath starts /api/, or\nwebfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: application/json"}
     G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/json"]
-    G -- no --> I{"JSON discovery path?\nwebfinger, nodeinfo,\noauth metadata & endpoints,\n*.json, or Accept: application/json"}
-    I -- yes --> I1["410, empty body\napplication/json"]
-    I -- no --> J{"Feed?\npath ends .rss / .atom"}
+    G -- no --> J{"Feed?\npath ends .rss / .atom"}
     J -- yes --> J1["410, empty body\napplication/rss+xml /\napplication/atom+xml"]
     J -- no --> L["410, HTML page\ntext/html"]
 ```
@@ -83,14 +81,15 @@ flowchart TD
 Every branch returns `410 Gone` except `/robots.txt`, which is a live `200`. A few
 notes that don't fit in the diagram:
 
-Body content only matters where a *human* reads it. The Mastodon REST API is
-consumed by apps (the official web client and third-party clients) that parse
-a JSON error's `error` field to show an alert — that's the one branch that
-gets a real body. Every other branch here is server-to-server or a library
-that only ever checks the `410` status (real Mastodon's own WebFinger 410 is
-a bare `head 410`, no body; its ActivityPub dereferencer only parses a
-response body on `200`), so they get an empty body instead of spending bytes
-on content nobody reads.
+Body content mostly matters where a *human* reads it. The Mastodon REST API
+is consumed by apps (the official web client and third-party clients) that
+parse a JSON error's `error` field to show an alert, so it shares that small
+JSON body with the JSON discovery paths (WebFinger, NodeInfo, OAuth/OIDC
+metadata, `*.json`) even though those are programmatic, status-code-only
+consumers — the body is cheap enough that a single shared response is
+simpler than special-casing each one. host-meta gets the equivalent as XRD
+XML. ActivityPub and feed responses stay empty, since Mastodon's own
+dereferencer and feed readers never parse a 410 body.
 
 A few more notes that don't fit in the diagram:
 
@@ -100,9 +99,7 @@ A few more notes that don't fit in the diagram:
   an inbox, not just the shared/per-actor `/inbox` path.
 - **Mastodon REST API and JSON discovery** are both matched **by path**,
   since these clients (apps, scrapers, OAuth libraries) often send a
-  browser-style `Accept` or none at all. `/api/…` is the highest-volume
-  traffic this server sees, so a 17-byte JSON body instead of the ~9 KB page
-  is the single biggest bandwidth saving. `/oauth/authorize` is deliberately
+  browser-style `Accept` or none at all. `/oauth/authorize` is deliberately
   excluded from the OAuth endpoints, since it's the interactive browser login
   page and still gets the HTML page.
 - **Feed** matches are a dead end for readers that would otherwise keep
@@ -117,8 +114,10 @@ bot's empty body) to every other visitor.
 
 A bucket of images/attachments is requested by `<img>`/`<video>` tags and
 server-side refetches that ignore any HTML body, so serving the ~9 KB page
-for each would waste bandwidth. Such requests get an **empty 410** instead. A
-request counts as media when any of:
+for each would waste bandwidth. Such requests get an **empty 410** instead,
+with `Content-Type` set to the specific type requested (e.g. `image/png`) so
+the client sees the same type it asked for. A request counts as media when
+any of:
 
 - the path starts with a Mastodon media prefix — `/media_proxy/`,
   `/media_attachments/`, or `/system/` (these often have no file extension and
@@ -128,6 +127,11 @@ request counts as media when any of:
 - the `Accept` header asks for `image/*`, `video/*`, or `audio/*` **and** does
   not include `text/html` (so a normal browser page load, whose `Accept` also
   lists image types, still gets the HTML page).
+
+The `Content-Type` is taken from the path's extension when it has one of the
+known media extensions, otherwise from the matching `image/…`, `video/…`, or
+`audio/…` token in `Accept` (for extensionless paths like a bare
+`/media_proxy/…` hit).
 
 ## Logging
 
