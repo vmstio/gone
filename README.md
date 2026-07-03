@@ -71,7 +71,7 @@ flowchart TD
     E -- yes --> E1["410 &lt;Error&gt;Gone&lt;/Error&gt;\napplication/xrd+xml"]
     E -- no --> G{"ActivityPub, REST API, Webfinger, or NodeInfo request?"}
     G -- yes --> G1["410 {#quot;error#quot;:#quot;Gone#quot;}\napplication/activity+json / application/json"]
-    G -- no --> J{"RSS feed request?\npath ends .rss"}
+    G -- no --> J{"RSS feed request?"}
     J -- yes --> J1["410, empty body\napplication/rss+xml"]
     J -- no --> L["410, HTML page\ntext/html"]
 ```
