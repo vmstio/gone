@@ -29,42 +29,32 @@ fallthrough = true
 pattern = "vmcrawl.com"
 custom_domain = true
 
+# Wildcard route for all vmcrawl.com subdomains (www and any future ones).
+# Requires a wildcard DNS record (orange-clouded) to already exist in the
+# zone; Wrangler will not manage DNS/certs for it.
 [[routes]]
-pattern = "www.vmcrawl.com"
-custom_domain = true
+pattern = "*.vmcrawl.com/*"
+zone_name = "vmcrawl.com"
 
 [[routes]]
 pattern = "mastoreqs.com"
 custom_domain = true
 
+# Wildcard route for all mastoreqs.com subdomains (www and any future ones).
+# Requires a wildcard DNS record (orange-clouded) to already exist in the
+# zone; Wrangler will not manage DNS/certs for it.
 [[routes]]
-pattern = "www.mastoreqs.com"
-custom_domain = true
+pattern = "*.mastoreqs.com/*"
+zone_name = "mastoreqs.com"
 
 [[routes]]
 pattern = "vmst.io"
 custom_domain = true
 
+# Wildcard route for all vmst.io subdomains (www, matrix, docs, status, cdn,
+# dna, and any future ones). Unlike custom_domain routes, this requires a
+# wildcard DNS record (orange-clouded) to already exist in the zone, and
+# Wrangler will not manage DNS/certs for it.
 [[routes]]
-pattern = "www.vmst.io"
-custom_domain = true
-
-[[routes]]
-pattern = "matrix.vmst.io"
-custom_domain = true
-
-[[routes]]
-pattern = "docs.vmst.io"
-custom_domain = true
-
-[[routes]]
-pattern = "status.vmst.io"
-custom_domain = true
-
-[[routes]]
-pattern = "cdn.vmst.io"
-custom_domain = true
-
-[[routes]]
-pattern = "dna.vmst.io"
-custom_domain = true
+pattern = "*.vmst.io/*"
+zone_name = "vmst.io"
