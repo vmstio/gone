@@ -101,6 +101,8 @@ A few more notes that don't fit in the diagram:
   `/users/x/inbox`) or by either the `Accept` or `Content-Type` header being
   `application/activity+json` **or** `application/ld+json` — inbox POSTs may
   omit `Accept` entirely, and actor/status fetches may use either media type.
+- **Accept** media types are parsed as individual ranges; a range with
+  `q=0` is not selected.
 - **Mastodon REST API and JSON discovery** are both matched **by path**,
   since these clients (apps, scrapers, OAuth libraries) often send a
   browser-style `Accept` or none at all. `/oauth/authorize` is deliberately

@@ -262,12 +262,37 @@ function domainFromRequest(request) {
   return host === "" ? defaultDomain : host;
 }
 
-// wantsAny reports whether a header value mentions any of the given media
-// types. Matching is a simple case-insensitive substring test, which is
-// enough to distinguish ActivityPub/JSON clients from browsers.
+// mediaRanges parses the parts of an Accept header that are relevant to
+// content negotiation. A malformed or out-of-range q value makes that range
+// unacceptable rather than accidentally selecting it.
+function mediaRanges(headerValue) {
+  return (headerValue || "").split(",").map((range) => {
+    const [rawType, ...parameters] = range.trim().split(";");
+    let quality = 1;
+    for (const parameter of parameters) {
+      const [name, value] = parameter.split("=", 2);
+      if (name.trim().toLowerCase() !== "q") continue;
+      const q = Number(value && value.trim());
+      quality = Number.isFinite(q) && q >= 0 && q <= 1 ? q : 0;
+    }
+    return { type: rawType.trim().toLowerCase(), quality };
+  });
+}
+
+// wantsAny reports whether an Accept header contains one of the given media
+// types at a positive quality value. Matching the parsed type avoids treating
+// a parameter value (or a q=0 range) as an accepted representation.
 function wantsAny(headerValue, ...mediaTypes) {
-  const v = (headerValue || "").toLowerCase();
-  return mediaTypes.some((mt) => v.includes(mt));
+  const wanted = new Set(mediaTypes.map((mediaType) => mediaType.toLowerCase()));
+  return mediaRanges(headerValue).some(({ type, quality }) => quality > 0 && wanted.has(type));
+}
+
+// contentTypeIsAny checks the single media type in a Content-Type header.
+// Unlike Accept, Content-Type has no quality values and must not be parsed as
+// a comma-separated preference list.
+function contentTypeIsAny(headerValue, ...mediaTypes) {
+  const type = (headerValue || "").split(";", 1)[0].trim().toLowerCase();
+  return mediaTypes.some((mediaType) => type === mediaType.toLowerCase());
 }
 
 // isHostMetaPath reports whether the request targets the host-meta discovery
@@ -340,7 +365,7 @@ function isInboxPath(p) {
 function isActivityPub(request) {
   return (
     wantsAny(request.headers.get("Accept"), "application/activity+json", "application/ld+json") ||
-    wantsAny(request.headers.get("Content-Type"), "application/activity+json", "application/ld+json")
+    contentTypeIsAny(request.headers.get("Content-Type"), "application/activity+json", "application/ld+json")
   );
 }
 
@@ -379,6 +404,18 @@ function extOf(p) {
   return dot === -1 ? "" : base.slice(dot).toLowerCase();
 }
 
+function isMediaType(type) {
+  return /^(?:image|video|audio)\/(?:[a-z0-9!#$&^_.+-]+|\*)$/.test(type);
+}
+
+// acceptedMediaType returns the first image/video/audio range that the
+// client accepts. It preserves a wildcard so callers can still recognize an
+// extensionless media request even though a wildcard is not a response type.
+function acceptedMediaType(headerValue) {
+  const range = mediaRanges(headerValue).find(({ type, quality }) => quality > 0 && isMediaType(type));
+  return range ? range.type : "";
+}
+
 // isMediaRequest reports whether the request is for image/video/audio media,
 // as a decommissioned S3 bucket of attachments would receive. These are
 // <img>/<video> subresources or server-side refetches that discard any HTML
@@ -394,11 +431,8 @@ function isMediaRequest(request, p) {
     return true;
   }
   if (mediaExts.has(extOf(p))) return true;
-  const accept = (request.headers.get("Accept") || "").toLowerCase();
-  return (
-    !accept.includes("text/html") &&
-    (accept.includes("image/") || accept.includes("video/") || accept.includes("audio/"))
-  );
+  const accept = request.headers.get("Accept");
+  return !wantsAny(accept, "text/html") && acceptedMediaType(accept) !== "";
 }
 
 // mediaContentType returns the Content-Type to echo back for a media
@@ -408,10 +442,10 @@ function isMediaRequest(request, p) {
 function mediaContentType(request, p) {
   const byExt = mediaExts.get(extOf(p));
   if (byExt) return byExt;
-  const match = (request.headers.get("Accept") || "")
-    .toLowerCase()
-    .match(/(?:image|video|audio)\/[a-z0-9.+-]+/);
-  return match ? match[0] : "";
+  const range = mediaRanges(request.headers.get("Accept")).find(
+    ({ type, quality }) => quality > 0 && isMediaType(type) && !type.endsWith("/*")
+  );
+  return range ? range.type : "";
 }
 
 // renderPage fills the per-request domain into the cached template. The
@@ -479,12 +513,13 @@ function handleGone(request) {
 
   // The resource is permanently gone, so let the client hold on to the 410
   // and stop re-requesting. "private" (rather than "public") is deliberate:
-  // the body varies by Accept/path, and shared caches like Cloudflare don't
-  // key on Vary by default, so a public directive lets one client's response
-  // (e.g. a bot's empty body) get served to every other visitor. private
-  // confines caching to the requesting client, which does respect Vary.
+  // the body varies by Accept, Content-Type, and path, and shared caches like
+  // Cloudflare don't key on Vary by default, so a public directive lets one
+  // client's response (e.g. a bot's empty body) get served to every other
+  // visitor. private confines caching to the requesting client, which does
+  // respect Vary.
   // Applies to every branch below.
-  const commonHeaders = { "Cache-Control": "private, max-age=86400", Vary: "Accept" };
+  const commonHeaders = { "Cache-Control": "private, max-age=86400", Vary: "Accept, Content-Type" };
 
   let response;
   if (path === "/robots.txt") {
