@@ -38,7 +38,7 @@ jobs:
 
   deploy:
     # Pull requests only run the test job; deploys happen from main.
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.test.result == 'success'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
