@@ -45,6 +45,9 @@ body {
   margin: 0 auto 24px;
   cursor: pointer;
 }
+@media (prefers-reduced-motion: reduce) {
+  .dialog__illustration canvas { cursor: default; }
+}
 .dialog h1 {
   font-size: 20px;
   font-weight: 400;
@@ -82,6 +85,7 @@ body {
   var speed = 1 / 6000; // progress units per ms — a slow, wind-borne drift
   var lastTs = null;
   var running = false;
+  var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
 
   function buildTiles() {
     var cols = Math.ceil(canvas.width / tileSize);
@@ -172,6 +176,7 @@ body {
   }
 
   function setTarget(t) {
+    if (reducedMotion && reducedMotion.matches) return;
     target = t;
     if (!running) {
       running = true;
@@ -242,15 +247,11 @@ function splitHostPort(host) {
   return host;
 }
 
-// rawHost returns the requested host, preferring the X-Forwarded-Host header
-// (as set by a proxy in front of the Worker) and falling back to the request's
-// own Host header. It may still include a port.
+// rawHost returns the host Cloudflare used to route the request. Deriving it
+// from the URL avoids reflecting a client-supplied X-Forwarded-Host header in
+// the page or request log. It may still include a port in local development.
 function rawHost(request) {
-  const url = new URL(request.url);
-  let host = request.headers.get("X-Forwarded-Host") || request.headers.get("Host") || url.host;
-  const i = host.indexOf(",");
-  if (i >= 0) host = host.slice(0, i);
-  return host.trim();
+  return new URL(request.url).host;
 }
 
 // domainFromRequest returns the requested host without any port or leading
@@ -518,7 +519,9 @@ function handleGone(request) {
   // client's response (e.g. a bot's empty body) get served to every other
   // visitor. private confines caching to the requesting client, which does
   // respect Vary.
-  // Applies to every branch below.
+  // Applies to every 410 branch below. robots.txt is a separately cacheable
+  // crawler directive, so it must not inherit these representation-specific
+  // headers.
   const commonHeaders = { "Cache-Control": "private, max-age=86400", Vary: "Accept, Content-Type" };
 
   let response;
@@ -527,7 +530,10 @@ function handleGone(request) {
     // 200 directive, not a 410.
     response = new Response("User-agent: *\nDisallow: /\n", {
       status: 200,
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "public, max-age=86400",
+      },
     });
   } else if (isMediaRequest(request, path)) {
     // Former bucket media (an <img>/<video> tag or a server refetch, which
@@ -565,14 +571,31 @@ function handleGone(request) {
     });
   }
 
-  for (const [k, v] of Object.entries(commonHeaders)) response.headers.set(k, v);
+  if (response.status === 410) {
+    for (const [k, v] of Object.entries(commonHeaders)) response.headers.set(k, v);
+  }
+
+  // These headers are safe for every representation. HTML additionally
+  // contains the retirement page, so it gets indexing and document controls.
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  if (response.headers.get("Content-Type")?.startsWith("text/html")) {
+    response.headers.set("X-Robots-Tag", "noindex, noarchive, nosnippet");
+    response.headers.set(
+      "Content-Security-Policy",
+      "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    );
+  }
   return response;
 }
 
 // handleHealthz responds 200 for platform health checks. Kept separate so
 // that real traffic (all 410) never makes the health check fail.
 function handleHealthz() {
-  return new Response("ok\n", { status: 200 });
+  return new Response("ok\n", {
+    status: 200,
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 export default {

@@ -5,9 +5,11 @@
   "description": "Tiny Cloudflare Worker that responds to every request with HTTP 410 Gone.",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "node --test"
   },
   "devDependencies": {
+    "miniflare": "4.20260701.0",
     "wrangler": "^4.107.0"
   }
 }

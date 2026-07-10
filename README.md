@@ -16,9 +16,10 @@ follows the browser's `prefers-color-scheme`.
 The HTML page is ~9 KB (~4.2 KB gzipped, handled automatically by
 Cloudflare's edge).
 
-The displayed domain is taken from the request (`X-Forwarded-Host`, falling
-back to `Host`, with any port and leading `www.` stripped, and the value
-HTML-escaped), so a single deployment can serve any number of domains.
+The displayed domain is taken from the routed request host (with any port and
+leading `www.` stripped, and the value HTML-escaped), so a single deployment
+can serve any number of domains. Client-supplied forwarding headers are not
+reflected in the page or logs.
 
 Example ActivityPub actor fetch:
 
@@ -35,6 +36,16 @@ curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 npx wrangler dev
 # then visit http://localhost:8787
 ```
+
+## Test
+
+```sh
+npm test
+```
+
+The Miniflare contract suite covers WebFinger, ActivityPub actor and inbox
+requests, media, content negotiation, the retirement-page headers, and the
+robots and health endpoints.
 
 ```sh
 curl -i http://localhost:8787/
@@ -114,7 +125,13 @@ A few more notes that don't fit in the diagram:
 All 410 responses carry `Cache-Control: private, max-age=86400` so the
 requesting client holds on to the 410 and stops re-requesting a permanently
 gone resource, without a shared cache serving one client's response (e.g. a
-bot's empty body) to every other visitor.
+bot's empty body) to every other visitor. `/robots.txt` instead uses a public
+one-day cache and needs no `Vary`; `/healthz` is `no-store`.
+
+The HTML retirement page also sends `X-Robots-Tag: noindex, noarchive,
+nosnippet`, a restrictive Content Security Policy, `X-Content-Type-Options:
+nosniff`, and `Referrer-Policy: no-referrer`. Its optional logo animation is
+disabled for visitors who prefer reduced motion.
 
 ### Media (former S3 bucket) requests
 
