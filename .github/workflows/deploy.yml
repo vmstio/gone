@@ -1,8 +1,9 @@
-name: Deploy Worker
+name: Test and Deploy Worker
 
-# Deploy to Cloudflare Workers from GitHub Actions on every push to main,
-# as an alternative to Cloudflare's Git-connected Workers Builds. This runs
-# the same `wrangler deploy` that works locally.
+# Run the test suite on every pull request and push to main, then deploy to
+# Cloudflare Workers from pushes to main only, as an alternative to
+# Cloudflare's Git-connected Workers Builds. The deploy runs the same
+# `wrangler deploy` that works locally.
 #
 # Requires one repository secret:
 #   CLOUDFLARE_API_TOKEN - a token with the "Edit Cloudflare Workers"
@@ -16,10 +17,29 @@ name: Deploy Worker
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
   deploy:
+    # Pull requests only run the test job; deploys happen from main.
+    if: github.event_name != 'pull_request'
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
