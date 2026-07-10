@@ -23,31 +23,6 @@ type = "Text"
 globs = ["**/*.svg"]
 fallthrough = true
 
-# Each hostname's zone must already be an active zone in this Cloudflare
-# account (orange-clouded DNS) for these to take effect. custom_domain = true
-# lets Wrangler create/manage the DNS record and certificate for each hostname.
-[[routes]]
-pattern = "vmcrawl.com"
-custom_domain = true
-
-# Wildcard route for all vmcrawl.com subdomains (www and any future ones).
-# Requires a wildcard DNS record (orange-clouded) to already exist in the
-# zone; Wrangler will not manage DNS/certs for it.
-[[routes]]
-pattern = "*.vmcrawl.com/*"
-zone_name = "vmcrawl.com"
-
-[[routes]]
-pattern = "mastoreqs.com"
-custom_domain = true
-
-# Wildcard route for all mastoreqs.com subdomains (www and any future ones).
-# Requires a wildcard DNS record (orange-clouded) to already exist in the
-# zone; Wrangler will not manage DNS/certs for it.
-[[routes]]
-pattern = "*.mastoreqs.com/*"
-zone_name = "mastoreqs.com"
-
 [[routes]]
 pattern = "vmst.io"
 custom_domain = true
