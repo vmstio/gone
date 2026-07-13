@@ -112,8 +112,9 @@ A few more notes that don't fit in the diagram:
   `/users/x/inbox`) or by either the `Accept` or `Content-Type` header being
   `application/activity+json` **or** `application/ld+json` — inbox POSTs may
   omit `Accept` entirely, and actor/status fetches may use either media type.
-- **Accept** media types are parsed as individual ranges; a range with
-  `q=0` is not selected.
+- **Accept** media types are parsed as individual ranges; `q` weights select
+  the preferred recognized representation, and a range with `q=0` is not
+  selected. On equal weights, browser HTML remains preferred over media.
 - **Mastodon REST API and JSON discovery** are both matched **by path**,
   since these clients (apps, scrapers, OAuth libraries) often send a
   browser-style `Accept` or none at all. `/oauth/authorize` is deliberately
@@ -147,31 +148,31 @@ any of:
   come with a browser-style `Accept`, e.g. hotlinked images); or
 - the path ends in a known media extension (`.jpg`, `.png`, `.gif`, `.webp`,
   `.mp4`, `.mp3`, …); or
-- the `Accept` header asks for `image/*`, `video/*`, or `audio/*` **and** does
-  not include `text/html` (so a normal browser page load, whose `Accept` also
-  lists image types, still gets the HTML page).
+- the `Accept` header prefers `image/*`, `video/*`, or `audio/*` over the
+  recognized HTML or machine-readable alternatives (so a normal browser page
+  load, whose `Accept` also lists image types, still gets the HTML page).
 
 The `Content-Type` is taken from the path's extension when it has one of the
-known media extensions, otherwise from the matching `image/…`, `video/…`, or
-`audio/…` token in `Accept` (for extensionless paths like a bare
-`/media_proxy/…` hit).
+known media extensions, otherwise from the highest-quality concrete `image/…`,
+`video/…`, or `audio/…` token in `Accept` (for extensionless paths like a
+bare `/media_proxy/…` hit).
 
 ## Logging
 
-One line is logged per request via `console.log`, visible with `wrangler
-tail` or Logpush, so you can see what is being probed. The Content-Type shows
-which branch matched:
+One structured JSON object is logged per request via `console.log`, visible
+with `wrangler tail` or Logpush, so you can see what is being probed. The
+Content-Type shows which branch matched:
 
-```
-410 GET /users/alice ct="application/activity+json; charset=utf-8" host="fedi.example" ip=203.0.113.5 ua="TestBot/1.0"
-200 GET /robots.txt ct="text/plain; charset=utf-8" host="example.com" ip=203.0.113.9 ua="Googlebot/2.1"
+```json
+{"message":"request","status":410,"method":"GET","path":"/users/alice","contentType":"application/activity+json; charset=utf-8","host":"fedi.example","clientIP":"203.0.113.5","userAgent":"TestBot/1.0"}
+{"message":"request","status":200,"method":"GET","path":"/robots.txt","contentType":"text/plain; charset=utf-8","host":"example.com","clientIP":"203.0.113.9","userAgent":"Googlebot/2.1"}
 ```
 
-Fields: status, method, path, `ct` (Content-Type), `host` (requested host),
-`ip` (`CF-Connecting-IP`, falling back to the first `X-Forwarded-For`
-entry), and `ua` (User-Agent). Health checks (`/healthz`) are not logged. Set
-the `LOG_REQUESTS` var to `"false"` in `wrangler.toml` to disable request
-logging entirely.
+Fields: message, status, method, path, `contentType`, `host` (requested host),
+`clientIP` (`CF-Connecting-IP`, falling back to the first `X-Forwarded-For`
+entry), and `userAgent`. Health checks (`/healthz`) are not logged. Set the
+`LOG_REQUESTS` var to `"false"` in `wrangler.toml` to disable request logging
+entirely.
 
 ## Endpoints
 

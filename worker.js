@@ -280,12 +280,28 @@ function mediaRanges(headerValue) {
   });
 }
 
-// wantsAny reports whether an Accept header contains one of the given media
-// types at a positive quality value. Matching the parsed type avoids treating
-// a parameter value (or a q=0 range) as an accepted representation.
-function wantsAny(headerValue, ...mediaTypes) {
+// qualityForAny returns the highest quality assigned to any of the given
+// media types. Matching the parsed type avoids treating a parameter value as
+// a representation, and lets callers compare the client's actual weights
+// instead of allowing the first positive range to win.
+function qualityForAny(headerValue, ...mediaTypes) {
   const wanted = new Set(mediaTypes.map((mediaType) => mediaType.toLowerCase()));
-  return mediaRanges(headerValue).some(({ type, quality }) => quality > 0 && wanted.has(type));
+  return mediaRanges(headerValue).reduce(
+    (best, { type, quality }) => (wanted.has(type) ? Math.max(best, quality) : best),
+    0
+  );
+}
+
+// bestAcceptedRange returns the highest-quality positive range matching the
+// predicate. Array order breaks equal-quality ties, preserving the order in
+// which the client listed otherwise-equivalent choices.
+function bestAcceptedRange(headerValue, predicate) {
+  let best = null;
+  for (const range of mediaRanges(headerValue)) {
+    if (range.quality <= 0 || !predicate(range.type)) continue;
+    if (best === null || range.quality > best.quality) best = range;
+  }
+  return best;
 }
 
 // contentTypeIsAny checks the single media type in a Content-Type header.
@@ -360,14 +376,30 @@ function isInboxPath(p) {
   return p.endsWith("/inbox");
 }
 
-// isActivityPub reports whether the request is ActivityPub, by either the
-// Accept header (actor fetches) or the Content-Type header (inbox deliveries,
-// which are POSTed with application/activity+json and may not set Accept).
-function isActivityPub(request) {
-  return (
-    wantsAny(request.headers.get("Accept"), "application/activity+json", "application/ld+json") ||
-    contentTypeIsAny(request.headers.get("Content-Type"), "application/activity+json", "application/ld+json")
+// hasActivityPubContentType identifies ActivityPub request bodies. This is a
+// stronger signal than Accept: inbox deliveries may omit Accept entirely, and
+// their request representation should not be reclassified by response weights.
+function hasActivityPubContentType(request) {
+  return contentTypeIsAny(
+    request.headers.get("Content-Type"),
+    "application/activity+json",
+    "application/ld+json"
   );
+}
+
+// preferredMachineRepresentation compares the recognized non-media response
+// types in Accept. Path-based responses are handled separately. Equal weights
+// retain the existing server preference for ActivityPub, then generic JSON.
+function preferredMachineRepresentation(headerValue) {
+  const activityPubQuality = qualityForAny(headerValue, "application/activity+json", "application/ld+json");
+  const jsonQuality = qualityForAny(headerValue, "application/json", "application/jrd+json");
+  const htmlQuality = qualityForAny(headerValue, "text/html");
+
+  if (activityPubQuality > 0 && activityPubQuality >= jsonQuality && activityPubQuality >= htmlQuality) {
+    return "activitypub";
+  }
+  if (jsonQuality > 0 && jsonQuality >= htmlQuality) return "json";
+  return "";
 }
 
 // mediaExts maps a media file extension to the Content-Type a bucket of
@@ -409,12 +441,11 @@ function isMediaType(type) {
   return /^(?:image|video|audio)\/(?:[a-z0-9!#$&^_.+-]+|\*)$/.test(type);
 }
 
-// acceptedMediaType returns the first image/video/audio range that the
-// client accepts. It preserves a wildcard so callers can still recognize an
-// extensionless media request even though a wildcard is not a response type.
-function acceptedMediaType(headerValue) {
-  const range = mediaRanges(headerValue).find(({ type, quality }) => quality > 0 && isMediaType(type));
-  return range ? range.type : "";
+// bestAcceptedMediaRange returns the highest-quality image/video/audio range.
+// It can preserve a wildcard so callers can recognize an extensionless media
+// request even though a wildcard is not a concrete response Content-Type.
+function bestAcceptedMediaRange(headerValue, concreteOnly = false) {
+  return bestAcceptedRange(headerValue, (type) => isMediaType(type) && (!concreteOnly || !type.endsWith("/*")));
 }
 
 // isMediaRequest reports whether the request is for image/video/audio media,
@@ -423,17 +454,28 @@ function acceptedMediaType(headerValue) {
 // body, so they get an empty 410 to save bandwidth.
 //
 // A browser page navigation also lists image types in Accept (e.g.
-// "text/html,...,image/avif,image/webp"), so an Accept-based match only counts
-// when text/html is absent. The file extension and known Mastodon media path
-// prefixes are checked as fallbacks for clients that send a browser-style
-// Accept (e.g. hotlinked <img> tags pointing at /media_proxy/…).
+// "text/html,...,image/avif,image/webp"), so an equally or more preferred
+// text/html range wins over media. More-preferred ActivityPub or JSON ranges
+// also win. The file extension and known Mastodon media path prefixes remain
+// authoritative for clients that send a browser-style Accept (e.g. hotlinked
+// <img> tags pointing at /media_proxy/…).
 function isMediaRequest(request, p) {
   if (p.startsWith("/media_proxy/") || p.startsWith("/media_attachments/") || p.startsWith("/system/")) {
     return true;
   }
   if (mediaExts.has(extOf(p))) return true;
   const accept = request.headers.get("Accept");
-  return !wantsAny(accept, "text/html") && acceptedMediaType(accept) !== "";
+  const mediaRange = bestAcceptedMediaRange(accept);
+  if (mediaRange === null) return false;
+
+  const htmlQuality = qualityForAny(accept, "text/html");
+  const activityPubQuality = qualityForAny(accept, "application/activity+json", "application/ld+json");
+  const jsonQuality = qualityForAny(accept, "application/json", "application/jrd+json");
+  return (
+    mediaRange.quality > htmlQuality &&
+    mediaRange.quality >= activityPubQuality &&
+    mediaRange.quality >= jsonQuality
+  );
 }
 
 // mediaContentType returns the Content-Type to echo back for a media
@@ -443,9 +485,7 @@ function isMediaRequest(request, p) {
 function mediaContentType(request, p) {
   const byExt = mediaExts.get(extOf(p));
   if (byExt) return byExt;
-  const range = mediaRanges(request.headers.get("Accept")).find(
-    ({ type, quality }) => quality > 0 && isMediaType(type) && !type.endsWith("/*")
-  );
+  const range = bestAcceptedMediaRange(request.headers.get("Accept"), true);
   return range ? range.type : "";
 }
 
@@ -491,17 +531,24 @@ function clientIP(request) {
   return "-";
 }
 
-// logRequest logs one line per request so you can see what is being probed,
-// visible via `wrangler tail` or Logpush. The response Content-Type indicates
-// which branch matched. Health checks are skipped to avoid drowning the log.
-// Set the LOG_REQUESTS var to "false" to disable.
+// logRequest logs one structured JSON object per request so fields remain
+// searchable and attacker-controlled values cannot forge the surrounding log
+// structure. Health checks are skipped to avoid drowning the log. Set the
+// LOG_REQUESTS var to "false" to disable.
 function logRequest(request, response, path, env) {
   if (env.LOG_REQUESTS === "false") return;
   if (path === "/healthz") return;
-  const ct = response.headers.get("Content-Type") || "-";
   console.log(
-    `${response.status} ${request.method} ${path}${new URL(request.url).search} ` +
-      `ct="${ct}" host="${rawHost(request)}" ip=${clientIP(request)} ua="${request.headers.get("User-Agent") || ""}"`
+    JSON.stringify({
+      message: "request",
+      status: response.status,
+      method: request.method,
+      path: `${path}${new URL(request.url).search}`,
+      contentType: response.headers.get("Content-Type") || "-",
+      host: rawHost(request),
+      clientIP: clientIP(request),
+      userAgent: request.headers.get("User-Agent") || "",
+    })
   );
 }
 
@@ -511,6 +558,7 @@ function logRequest(request, response, path, env) {
 // while human browsers get the HTML page.
 function handleGone(request) {
   const path = new URL(request.url).pathname;
+  const preferredMachine = preferredMachineRepresentation(request.headers.get("Accept"));
 
   // The resource is permanently gone, so let the client hold on to the 410
   // and stop re-requesting. "private" (rather than "public") is deliberate:
@@ -545,7 +593,7 @@ function handleGone(request) {
     // host-meta 410 is a bare `head 410`, but a small XRD error body costs
     // little and mirrors the JSON error given to the other discovery paths.
     response = writeGone("application/xrd+xml; charset=utf-8", xrdGoneBody);
-  } else if (isInboxPath(path) || isActivityPub(request)) {
+  } else if (isInboxPath(path) || hasActivityPubContentType(request) || preferredMachine === "activitypub") {
     // Inbox delivery POSTs (by path, since they may lack Accept) and
     // actor/status fetches (by Accept or Content-Type): same JSON error
     // body as the branch below, but kept as application/activity+json since
@@ -554,7 +602,7 @@ function handleGone(request) {
   } else if (
     isAPIPath(path) ||
     isJSONPath(path) ||
-    wantsAny(request.headers.get("Accept"), "application/json", "application/jrd+json")
+    preferredMachine === "json"
   ) {
     // Mastodon REST API, WebFinger / NodeInfo / OAuth discovery, .json
     // resources (all by path, any Accept), and generic JSON clients all get

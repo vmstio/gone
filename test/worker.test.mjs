@@ -91,6 +91,27 @@ test("extensionless media requests fall back to the Accept header", async () => 
   assert.equal(browser.headers.get("Content-Type"), "text/html; charset=utf-8");
 });
 
+test("Accept quality weights select the preferred representation", async () => {
+  const media = await request("/some/attachment", {
+    headers: { Accept: "image/avif;q=0.1, image/webp;q=1" },
+  });
+  const json = await request("/profile", {
+    headers: { Accept: "application/activity+json;q=0.1, application/json;q=1" },
+  });
+  const html = await request("/profile", {
+    headers: { Accept: "application/activity+json;q=0.1, text/html;q=1" },
+  });
+  const jsonOverMedia = await request("/profile", {
+    headers: { Accept: "image/avif;q=0.1, application/json;q=1" },
+  });
+
+  assert.equal(media.headers.get("Content-Type"), "image/webp");
+  assert.equal(await media.text(), "");
+  assert.equal(json.headers.get("Content-Type"), "application/json; charset=utf-8");
+  assert.equal(html.headers.get("Content-Type"), "text/html; charset=utf-8");
+  assert.equal(jsonOverMedia.headers.get("Content-Type"), "application/json; charset=utf-8");
+});
+
 test("JSON paths answer with JSON even without an Accept header", async () => {
   const paths = ["/api/v1/instance", "/.well-known/webfinger", "/nodeinfo/2.0", "/oauth/token", "/statuses/123.json"];
 
@@ -157,6 +178,9 @@ test("robots and health endpoints have endpoint-specific cache directives", asyn
 test("request logging does not break responses when enabled", async () => {
   // The shared instance disables LOG_REQUESTS, so logRequest's real code
   // path (URL parsing, header reads, clientIP) never runs there.
+  const messages = [];
+  const originalConsoleLog = console.log;
+  console.log = (...args) => messages.push(args.join(" "));
   const logging = new Miniflare({
     modules: true,
     scriptPath: "worker.js",
@@ -165,11 +189,26 @@ test("request logging does not break responses when enabled", async () => {
   });
 
   try {
-    const response = await logging.dispatchFetch("https://retired.example/users/alice", {
-      headers: { "X-Forwarded-For": "203.0.113.7", "User-Agent": "probe/1.0" },
+    const response = await logging.dispatchFetch("https://retired.example/users/alice?source=test", {
+      headers: { "X-Forwarded-For": "203.0.113.7", "User-Agent": 'probe" ip=fake' },
     });
     assert.equal(response.status, 410);
+
+    const message = messages.find((candidate) => candidate.includes('{"message":"request"'));
+    assert.ok(message, "structured request log was emitted");
+    const entry = JSON.parse(message.slice(message.indexOf("{")));
+    assert.deepEqual(entry, {
+      message: "request",
+      status: 410,
+      method: "GET",
+      path: "/users/alice?source=test",
+      contentType: "text/html; charset=utf-8",
+      host: "retired.example",
+      clientIP: "127.0.0.1",
+      userAgent: 'probe" ip=fake',
+    });
   } finally {
+    console.log = originalConsoleLog;
     await logging.dispose();
   }
 });
