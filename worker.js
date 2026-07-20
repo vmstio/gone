@@ -4,8 +4,10 @@
 
 import LOGO_SVG from "./logo.svg";
 
-// defaultDomain is shown when the request carries no usable Host header.
-const defaultDomain = "This site";
+// displayDomain is intentionally fixed so the HTML response is identical
+// across every hostname routed to this Worker and can be safely shared by
+// Workers Cache, whose base cache key does not include the request host.
+const displayDomain = "vmst.io";
 
 const PAGE_TEMPLATE = `<!DOCTYPE html>
 <html lang="en">
@@ -233,34 +235,11 @@ function escapeHTML(s) {
     .replace(/"/g, "&#34;");
 }
 
-// splitHostPort strips a trailing ":<port>" from a host, handling bracketed
-// IPv6 literals like "[::1]:8080". Mirrors net.SplitHostPort closely enough
-// for display purposes.
-function splitHostPort(host) {
-  if (host.startsWith("[")) {
-    const end = host.indexOf("]");
-    if (end !== -1) return host.slice(1, end);
-    return host;
-  }
-  const idx = host.lastIndexOf(":");
-  if (idx !== -1 && host.indexOf(":") === idx) return host.slice(0, idx);
-  return host;
-}
-
 // rawHost returns the host Cloudflare used to route the request. Deriving it
 // from the URL avoids reflecting a client-supplied X-Forwarded-Host header in
-// the page or request log. It may still include a port in local development.
+// the request log. It may still include a port in local development.
 function rawHost(request) {
   return new URL(request.url).host;
-}
-
-// domainFromRequest returns the requested host without any port or leading
-// "www.", for display. Visitors landing on the www subdomain should still
-// see the bare domain, since both point at the same decommissioned service.
-function domainFromRequest(request) {
-  let host = splitHostPort(rawHost(request));
-  if (host.toLowerCase().startsWith("www.")) host = host.slice(4);
-  return host === "" ? defaultDomain : host;
 }
 
 // mediaRanges parses the parts of an Accept header that are relevant to
@@ -489,14 +468,15 @@ function mediaContentType(request, p) {
   return range ? range.type : "";
 }
 
-// renderPage fills the per-request domain into the cached template. The
-// replacement is a function so that "$" sequences in the (client-controlled)
-// domain are inserted literally instead of being interpreted as replaceAll
-// substitution patterns like $& or $'.
+// renderPage fills the fixed display domain into the cached template. The
+// replacement is a function so "$" sequences would be inserted literally
+// instead of being interpreted as replaceAll substitution patterns like $&.
 function renderPage(domain) {
   const escaped = escapeHTML(domain);
   return pageTpl.replaceAll("__DOMAIN__", () => escaped);
 }
+
+const retirementPage = renderPage(displayDomain);
 
 // jsonGoneBody is the small JSON error shared by the Mastodon REST API and
 // JSON discovery paths. Mastodon's own web client (and third-party apps)
@@ -561,12 +541,12 @@ function handleGone(request) {
   const preferredMachine = preferredMachineRepresentation(request.headers.get("Accept"));
 
   // The resource is permanently gone, so let the client hold on to the 410
-  // and stop re-requesting. "private" (rather than "public") is deliberate:
-  // the body varies by Accept, Content-Type, and path, and shared caches like
-  // Cloudflare don't key on Vary by default, so a public directive lets one
-  // client's response (e.g. a bot's empty body) get served to every other
-  // visitor. private confines caching to the requesting client, which does
-  // respect Vary.
+  // and stop re-requesting. Workers Cache now honors Vary, which makes the
+  // representations safe to share at Cloudflare's edge. The HTML uses the
+  // fixed displayDomain above, so it is also safe even though Workers Cache
+  // deliberately omits the request host from its base key.
+  // Cloudflare-CDN-Cache-Control is edge-only and takes precedence over the
+  // client-facing private directive.
   // Applies to every 410 branch below. robots.txt is a separately cacheable
   // crawler directive, so it must not inherit these representation-specific
   // headers.
@@ -613,7 +593,7 @@ function handleGone(request) {
     // the 410 and stop polling. The body is empty.
     response = writeGone("application/rss+xml; charset=utf-8", "");
   } else {
-    response = new Response(renderPage(domainFromRequest(request)), {
+    response = new Response(retirementPage, {
       status: 410,
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
@@ -621,6 +601,7 @@ function handleGone(request) {
 
   if (response.status === 410) {
     for (const [k, v] of Object.entries(commonHeaders)) response.headers.set(k, v);
+    response.headers.set("Cloudflare-CDN-Cache-Control", "public, max-age=2592000");
   }
 
   // These headers are safe for every representation. HTML additionally

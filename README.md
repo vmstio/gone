@@ -16,10 +16,9 @@ follows the browser's `prefers-color-scheme`.
 The HTML page is ~9 KB (~4.2 KB gzipped, handled automatically by
 Cloudflare's edge).
 
-The displayed domain is taken from the routed request host (with any port and
-leading `www.` stripped, and the value HTML-escaped), so a single deployment
-can serve any number of domains. Client-supplied forwarding headers are not
-reflected in the page or logs.
+The page always displays `vmst.io`, regardless of which hostname routed the
+request. Client-supplied forwarding headers are not reflected in the page or
+logs.
 
 Example ActivityPub actor fetch:
 
@@ -125,9 +124,20 @@ A few more notes that don't fit in the diagram:
 
 All 410 responses carry `Cache-Control: private, max-age=86400` so the
 requesting client holds on to the 410 and stops re-requesting a permanently
-gone resource, without a shared cache serving one client's response (e.g. a
-bot's empty body) to every other visitor. `/robots.txt` instead uses a public
-one-day cache and needs no `Vary`; `/healthz` is `no-store`.
+gone resource. Workers Cache is also enabled in `wrangler.toml`. Every 410
+response adds the edge-only
+`Cloudflare-CDN-Cache-Control: public, max-age=2592000` header, so Cloudflare can
+serve them from its tiered cache without invoking the Worker while browsers
+and downstream shared caches still see the private one-day directive. The
+30-day edge TTL is safe across changes because Workers Cache keys entries by
+Worker version by default. Their existing `Vary: Accept, Content-Type` header
+keeps HTML, JSON, ActivityPub, and media representations distinct.
+
+The HTML page is safe to share even though a Worker's cache key does not include
+the host because its displayed domain is fixed to `vmst.io`. `/robots.txt`
+uses a public one-day cache and needs no `Vary`; `/healthz` is `no-store`.
+Only `GET` and `HEAD` are cacheable, so ActivityPub inbox `POST` requests still
+invoke the Worker.
 
 The HTML retirement page also sends `X-Robots-Tag: noindex, noarchive,
 nosnippet`, a restrictive Content Security Policy, `X-Content-Type-Options:
@@ -159,9 +169,11 @@ bare `/media_proxy/…` hit).
 
 ## Logging
 
-One structured JSON object is logged per request via `console.log`, visible
-with `wrangler tail` or Logpush, so you can see what is being probed. The
-Content-Type shows which branch matched:
+One structured JSON object is logged per Worker invocation via `console.log`,
+visible with `wrangler tail` or Logpush, so you can see what is being probed.
+Workers Cache hits do not invoke the Worker and therefore do not produce this
+log line; cache hits, misses, and bypasses are available in Workers
+Observability instead. The Content-Type shows which branch matched:
 
 ```json
 {"message":"request","status":410,"method":"GET","path":"/users/alice","contentType":"application/activity+json; charset=utf-8","host":"fedi.example","clientIP":"203.0.113.5","userAgent":"TestBot/1.0"}

@@ -2,6 +2,11 @@ name = "gone"
 main = "worker.js"
 compatibility_date = "2026-07-01"
 
+# Put Cloudflare's tiered Workers Cache in front of this Worker. Individual
+# responses still opt in or out through their cache-control headers.
+[cache]
+enabled = true
+
 # Workers Logs (persisted/queryable in the dashboard). invocation_logs is
 # disabled since it duplicates this Worker's own console.log line for every
 # request.

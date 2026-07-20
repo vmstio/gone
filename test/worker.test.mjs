@@ -25,6 +25,7 @@ test("WebFinger returns a cacheable JSON 410", async () => {
   assert.equal(response.status, 410);
   assert.equal(response.headers.get("Content-Type"), "application/json; charset=utf-8");
   assert.equal(response.headers.get("Cache-Control"), "private, max-age=86400");
+  assert.equal(response.headers.get("Cloudflare-CDN-Cache-Control"), "public, max-age=2592000");
   assert.equal(response.headers.get("Vary"), "Accept, Content-Type");
   assert.equal(await response.text(), '{"error":"Gone"}\n');
 });
@@ -67,6 +68,7 @@ test("media and rejected JSON ranges do not receive the HTML page", async () => 
   assert.equal(media.headers.get("Vary"), "Accept, Content-Type");
   assert.equal(media.headers.get("X-Content-Type-Options"), "nosniff");
   assert.equal(media.headers.get("Referrer-Policy"), "no-referrer");
+  assert.equal(media.headers.get("Cloudflare-CDN-Cache-Control"), "public, max-age=2592000");
 });
 
 test("extensionless media requests fall back to the Accept header", async () => {
@@ -139,7 +141,7 @@ test("RSS feeds receive an empty 410 with the feed content type", async () => {
   assert.equal(await response.text(), "");
 });
 
-test("the retirement page has document protections and uses the routed host", async () => {
+test("the retirement page has document protections and uses the fixed domain", async () => {
   const response = await request("/", { headers: { "X-Forwarded-Host": "attacker.example" } });
   const page = await response.text();
 
@@ -147,17 +149,20 @@ test("the retirement page has document protections and uses the routed host", as
   assert.equal(response.headers.get("X-Robots-Tag"), "noindex, noarchive, nosnippet");
   assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
   assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
+  assert.equal(response.headers.get("Cache-Control"), "private, max-age=86400");
+  assert.equal(response.headers.get("Cloudflare-CDN-Cache-Control"), "public, max-age=2592000");
   assert.match(response.headers.get("Content-Security-Policy"), /default-src 'none'/);
-  assert.match(page, /retired\.example is HTTP 410 \(Gone\)/);
+  assert.match(page, /vmst\.io is HTTP 410 \(Gone\)/);
+  assert.doesNotMatch(page, /retired\.example/);
   assert.doesNotMatch(page, /attacker\.example/);
 });
 
-test("the displayed domain drops a www prefix and any port", async () => {
+test("the displayed domain is fixed across routed hostnames", async () => {
   const response = await mf.dispatchFetch("https://www.retired.example:8443/");
   const page = await response.text();
 
   assert.equal(response.status, 410);
-  assert.match(page, /retired\.example is HTTP 410 \(Gone\)/);
+  assert.match(page, /vmst\.io is HTTP 410 \(Gone\)/);
   assert.doesNotMatch(page, /www\.retired\.example|8443/);
 });
 
