@@ -32,14 +32,15 @@ curl -i -H 'Accept: application/activity+json' https://your.domain/users/alice
 ## Run locally
 
 ```sh
-npx wrangler dev
+pnpm install
+pnpm dev
 # then visit http://localhost:8787
 ```
 
 ## Test
 
 ```sh
-npm test
+pnpm test
 ```
 
 The Miniflare contract suite covers WebFinger, ActivityPub actor and inbox
@@ -58,7 +59,7 @@ account (orange-clouded DNS). Add a `[[routes]]` entry per hostname in
 `wrangler.toml` with `custom_domain = true`, then:
 
 ```sh
-npx wrangler deploy
+pnpm deploy
 ```
 
 Wrangler creates/manages the DNS record and certificate for each attached
